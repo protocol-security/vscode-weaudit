@@ -16,6 +16,7 @@ export class DecorationManager {
     public otherNoteDecorationType;
     public auditedFileDecorationType;
     public staleAuditedFileDecorationType;
+    public staleFindingDecorationType;
 
     constructor(context: vscode.ExtensionContext) {
         this.gutterIconPath = vscode.Uri.file(context.asAbsolutePath(GUTTER_ICON_PATH));
@@ -26,6 +27,7 @@ export class DecorationManager {
         this.otherNoteDecorationType = this.loadOtherNoteDecorationConfiguration();
         this.auditedFileDecorationType = this.loadAuditedDecorationConfiguration();
         this.staleAuditedFileDecorationType = this.loadStaleAuditedDecorationConfiguration();
+        this.staleFindingDecorationType = this.loadStaleFindingDecorationConfiguration();
     }
 
     private createDecorationTypeWithString(color: string): vscode.TextEditorDecorationType {
@@ -84,6 +86,14 @@ export class DecorationManager {
         });
     }
 
+    private loadStaleFindingDecorationConfiguration(): vscode.TextEditorDecorationType {
+        // Same background as stale reviews, but without built-in text (text is added via custom labels)
+        return vscode.window.createTextEditorDecorationType({
+            isWholeLine: true,
+            backgroundColor: "rgba(255, 165, 0, 0.2)",
+        });
+    }
+
     /**
      * Reload all decoration configurations.
      * TODO: make it possible to reload only one decoration type
@@ -97,6 +107,7 @@ export class DecorationManager {
         this.otherNoteDecorationType.dispose();
         this.auditedFileDecorationType.dispose();
         this.staleAuditedFileDecorationType.dispose();
+        this.staleFindingDecorationType.dispose();
 
         this.ownFindingDecorationType = this.loadOwnDecorationConfiguration();
         this.otherFindingDecorationType = this.loadOtherDecorationConfiguration();
@@ -104,6 +115,7 @@ export class DecorationManager {
         this.otherNoteDecorationType = this.loadOtherNoteDecorationConfiguration();
         this.auditedFileDecorationType = this.loadAuditedDecorationConfiguration();
         this.staleAuditedFileDecorationType = this.loadStaleAuditedDecorationConfiguration();
+        this.staleFindingDecorationType = this.loadStaleFindingDecorationConfiguration();
     }
 }
 

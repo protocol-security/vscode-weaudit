@@ -3882,6 +3882,25 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
     }
 
     /**
+     * Checks if a location's content matches its stored hash (without attempting relocation).
+     * @param location The location to check
+     * @returns true if the location is up to date, false otherwise
+     */
+    private isLocationUpToDate(location: FullLocation): boolean {
+        try {
+            const filePath = path.join(location.rootPath, location.path);
+            const fileContent = fs.readFileSync(filePath, "utf8");
+            const lines = fileContent.split("\n");
+            const regionContent = lines.slice(location.startLine, location.endLine + 1).join("\n");
+
+            // Check if content matches hash
+            return contentMatchesHash(regionContent, location.contentHash);
+        } catch (error) {
+            return false;
+        }
+    }
+
+    /**
      * Attempts to relocate a location if its content has moved.
      * @param location The location to check and potentially relocate
      * @returns true if the location is up to date or was successfully relocated, false otherwise
@@ -3932,7 +3951,6 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
      * @returns An array of StaleReviewItem objects
      */
     private collectStaleReviews(): StaleReviewItem[] {
-        console.log('[weAudit] collectStaleReviews() called');
         const staleItems: StaleReviewItem[] = [];
         const authorsToSave = new Set<string>();
 
@@ -3980,8 +3998,6 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
         for (const entry of this.treeEntries) {
             let entryModified = false;
             for (const location of entry.locations) {
-                console.log(`[weAudit] Checking finding/note location: ${location.path} lines ${location.startLine}-${location.endLine}, hash: ${location.contentHash ? 'present' : 'missing'}`);
-
                 // Store original line numbers to detect if relocation happened
                 const originalStartLine = location.startLine;
                 const originalEndLine = location.endLine;
@@ -4083,7 +4099,10 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
         const otherDecorations: vscode.Range[] = [];
         const ownNoteDecorations: vscode.Range[] = [];
         const otherNoteDecorations: vscode.Range[] = [];
+        const staleDecorations: vscode.Range[] = [];
         const labelDecorations: vscode.DecorationOptions[] = [];
+        const staleLabels: vscode.DecorationOptions[] = [];
+        const staleLabelLines = new Set<number>(); // Track lines that already have stale labels
 
         for (const treeItem of this.treeEntries) {
             const isOwnEntry = this.username === treeItem.author;
@@ -4096,12 +4115,38 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                     if (location.path !== fname || location.rootPath !== wsRoot.rootPath) {
                         continue;
                     }
+
+                    // Check if this finding/note location is stale
+                    const isStale = !this.isLocationUpToDate(location);
+
                     const range = new vscode.Range(location.startLine, 0, location.endLine, Number.MAX_SAFE_INTEGER);
-                    if (treeItem.entryType === EntryType.Finding) {
-                        findingDecoration.push(range);
-                    } else if (treeItem.entryType === EntryType.Note) {
-                        noteDecoration.push(range);
+                    if (isStale) {
+                        // Stale finding/note - use stale decoration
+                        staleDecorations.push(range);
+                        // Add stale warning label at the bottom, but only if there isn't already one
+                        if (!staleLabelLines.has(location.endLine)) {
+                            const staleLabel = {
+                                range: new vscode.Range(location.endLine, 0, location.endLine, Number.MAX_SAFE_INTEGER),
+                                renderOptions: {
+                                    after: {
+                                        contentText: "  ⚠ Content changed since creation",
+                                        color: "rgba(255, 150, 0, 0.8)",
+                                        margin: "0 0 0 1em",
+                                    },
+                                },
+                            };
+                            staleLabels.push(staleLabel);
+                            staleLabelLines.add(location.endLine);
+                        }
+                    } else {
+                        // Up-to-date finding/note - use normal decoration
+                        if (treeItem.entryType === EntryType.Finding) {
+                            findingDecoration.push(range);
+                        } else if (treeItem.entryType === EntryType.Note) {
+                            noteDecoration.push(range);
+                        }
                     }
+
                     // add the author information
                     const extraLabel = isOwnEntry ? "(you)" : "(" + treeItem.author + ")";
                     const labelString =
@@ -4159,13 +4204,16 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                     reviewerLabels.push(reviewerLabelDecoration(paf.startLine, paf.author, paf.timestamp));
                 } else {
                     stalePartiallyAuditedDecorations.push(decoration);
+                    // Track that this line has a stale label
+                    staleLabelLines.add(paf.startLine);
                 }
             }
         }
 
         editor.setDecorations(this.decorationManager.auditedFileDecorationType, range.map(r => ({ range: r })).concat(partiallyAuditedDecorations));
         editor.setDecorations(this.decorationManager.staleAuditedFileDecorationType, staleRange.map(r => ({ range: r })).concat(stalePartiallyAuditedDecorations));
-        editor.setDecorations(this.decorationManager.emptyDecorationType, labelDecorations.concat(reviewerLabels).concat(fullFileReviewerLabels));
+        editor.setDecorations(this.decorationManager.staleFindingDecorationType, staleDecorations.map(r => ({ range: r })));
+        editor.setDecorations(this.decorationManager.emptyDecorationType, labelDecorations.concat(reviewerLabels).concat(fullFileReviewerLabels).concat(staleLabels));
     }
 
     /**
@@ -4871,10 +4919,8 @@ export class AuditMarker {
         });
 
         // Listen for document saves to trigger auto-relocation
-        console.log('[weAudit] Registering document save listener for auto-relocation');
         vscode.workspace.onDidSaveTextDocument((document: vscode.TextDocument) => {
             // Check if this document has any findings or reviews that might need relocation
-            console.log(`[weAudit] Document saved: ${document.uri.fsPath}`);
             const uri = document.uri;
             this.decorateWithUri(uri);
         });
