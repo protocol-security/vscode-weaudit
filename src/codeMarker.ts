@@ -885,6 +885,14 @@ class WARoot {
     isAuditedFileUpToDate(auditedFile: AuditedFile): boolean {
         try {
             const filePath = path.join(this.rootPath, auditedFile.path);
+
+            // Check if this is a directory - directories don't have content hashes
+            const stats = fs.statSync(filePath);
+            if (stats.isDirectory()) {
+                // Directories are always considered "up to date" since we don't track their content
+                return true;
+            }
+
             const fileContent = fs.readFileSync(filePath, "utf8");
             return contentMatchesHash(fileContent, auditedFile.contentHash);
         } catch (error) {
