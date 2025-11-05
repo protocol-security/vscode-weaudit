@@ -15,6 +15,7 @@ export class DecorationManager {
     public ownNoteDecorationType;
     public otherNoteDecorationType;
     public auditedFileDecorationType;
+    public staleAuditedFileDecorationType;
 
     constructor(context: vscode.ExtensionContext) {
         this.gutterIconPath = vscode.Uri.file(context.asAbsolutePath(GUTTER_ICON_PATH));
@@ -24,6 +25,7 @@ export class DecorationManager {
         this.ownNoteDecorationType = this.loadOwnNoteDecorationConfiguration();
         this.otherNoteDecorationType = this.loadOtherNoteDecorationConfiguration();
         this.auditedFileDecorationType = this.loadAuditedDecorationConfiguration();
+        this.staleAuditedFileDecorationType = this.loadStaleAuditedDecorationConfiguration();
     }
 
     private createDecorationTypeWithString(color: string): vscode.TextEditorDecorationType {
@@ -68,6 +70,20 @@ export class DecorationManager {
         });
     }
 
+    private loadStaleAuditedDecorationConfiguration(): vscode.TextEditorDecorationType {
+        // Use a different visual indicator for stale audited content
+        // Semi-transparent orange/yellow background to indicate content has changed
+        return vscode.window.createTextEditorDecorationType({
+            isWholeLine: true,
+            backgroundColor: "rgba(255, 165, 0, 0.2)",
+            after: {
+                contentText: " ⚠ Content changed since review",
+                color: "rgba(255, 150, 0, 0.8)",
+                margin: "0 0 0 1em",
+            },
+        });
+    }
+
     /**
      * Reload all decoration configurations.
      * TODO: make it possible to reload only one decoration type
@@ -80,12 +96,14 @@ export class DecorationManager {
         this.ownNoteDecorationType.dispose();
         this.otherNoteDecorationType.dispose();
         this.auditedFileDecorationType.dispose();
+        this.staleAuditedFileDecorationType.dispose();
 
         this.ownFindingDecorationType = this.loadOwnDecorationConfiguration();
         this.otherFindingDecorationType = this.loadOtherDecorationConfiguration();
         this.ownNoteDecorationType = this.loadOwnNoteDecorationConfiguration();
         this.otherNoteDecorationType = this.loadOtherNoteDecorationConfiguration();
         this.auditedFileDecorationType = this.loadAuditedDecorationConfiguration();
+        this.staleAuditedFileDecorationType = this.loadStaleAuditedDecorationConfiguration();
     }
 }
 
@@ -123,6 +141,61 @@ export function labelAfterFirstLineTextDecoration(line: number, label: string): 
                 after: {
                     contentText: ("      " + label).replace(/ /g, SPACE),
                     color: "#11111188",
+                },
+            },
+        },
+    };
+}
+
+/**
+ * Formats a timestamp for display.
+ * @param timestamp ISO timestamp string
+ * @returns Formatted date string
+ */
+function formatTimestamp(timestamp: string | undefined): string {
+    if (!timestamp) {
+        return "";
+    }
+    try {
+        const date = new Date(timestamp);
+        // Format as "MMM DD, YYYY HH:MM"
+        const options: Intl.DateTimeFormatOptions = {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+        };
+        return " on " + date.toLocaleString(undefined, options);
+    } catch (error) {
+        return "";
+    }
+}
+
+/**
+ * Creates a text decoration for a reviewed region showing the reviewer.
+ * @param line the last line of the reviewed region
+ * @param author the author who reviewed this region
+ * @param timestamp optional timestamp when the review was done
+ * @returns the text decoration
+ */
+export function reviewerLabelDecoration(line: number, author: string, timestamp?: string): vscode.DecorationOptions {
+    const timestampStr = formatTimestamp(timestamp);
+    return {
+        range: new vscode.Range(line, 0, line, Number.MAX_SAFE_INTEGER),
+        renderOptions: {
+            dark: {
+                after: {
+                    contentText: ("  ✓ Reviewed by " + author + timestampStr).replace(/ /g, SPACE),
+                    color: "#88aa8888",
+                    fontStyle: "italic",
+                },
+            },
+            light: {
+                after: {
+                    contentText: ("  ✓ Reviewed by " + author + timestampStr).replace(/ /g, SPACE),
+                    color: "#33663388",
+                    fontStyle: "italic",
                 },
             },
         },

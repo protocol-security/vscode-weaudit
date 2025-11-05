@@ -58,6 +58,11 @@
                     "contextualTitle": "weAudit"
                 },
                 {
+                    "id": "staleReviews",
+                    "name": "Stale Reviews",
+                    "contextualTitle": "weAudit"
+                },
+                {
                     "type": "webview",
                     "id": "gitConfig",
                     "name": "Repository Configuration",
@@ -189,6 +194,16 @@
             {
                 "command": "weAudit.addPartiallyAudited",
                 "title": "weAudit: Mark Region as Reviewed"
+            },
+            {
+                "command": "weAudit.updateStaleReview",
+                "title": "Accept Changes",
+                "icon": "$(check)"
+            },
+            {
+                "command": "weAudit.deleteStaleReview",
+                "title": "Delete Review",
+                "icon": "$(trash)"
             },
             {
                 "command": "weAudit.addFinding",
@@ -424,6 +439,16 @@
                 {
                     "command": "weAudit.deleteResolvedFinding",
                     "when": "view == resolvedFindings",
+                    "group": "inline@2"
+                },
+                {
+                    "command": "weAudit.updateStaleReview",
+                    "when": "view == staleReviews",
+                    "group": "inline@1"
+                },
+                {
+                    "command": "weAudit.deleteStaleReview",
+                    "when": "view == staleReviews",
                     "group": "inline@2"
                 }
             ],

@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention */
 
+import * as crypto from "crypto";
+
 /**
  * Represents the type of an entry.
  *
@@ -240,6 +242,9 @@ export interface Location {
 
     /** The description of the location. This is currently used only when externally loading entries */
     description: string;
+
+    /** The content hash of the code region (optional for backward compatibility) */
+    contentHash?: string;
 }
 
 /**
@@ -468,6 +473,10 @@ export function mergeTwoPartiallyAuditedFileArrays(a: PartiallyAuditedFile[], b:
 export interface AuditedFile {
     path: string;
     author: string;
+    /** The content hash of the file when it was marked as audited (optional for backward compatibility) */
+    contentHash?: string;
+    /** The timestamp when the file was marked as audited (optional for backward compatibility) */
+    timestamp?: string;
 }
 
 export interface PartiallyAuditedFile {
@@ -475,6 +484,10 @@ export interface PartiallyAuditedFile {
     author: string;
     startLine: number;
     endLine: number;
+    /** The content hash of the code region when it was marked as audited (optional for backward compatibility) */
+    contentHash?: string;
+    /** The timestamp when the region was marked as audited (optional for backward compatibility) */
+    timestamp?: string;
 }
 
 export enum TreeViewMode {
@@ -552,4 +565,55 @@ export function isWorkspaceRootEntry(treeEntry: ConfigTreeEntry): treeEntry is W
 
 export function configEntryEquals(a: ConfigurationEntry, b: ConfigurationEntry): boolean {
     return a.path === b.path && a.username === b.username && a.root.label === b.root.label;
+}
+
+// ====================================================================
+// Content Hash Functions
+// ====================================================================
+
+/**
+ * Computes a SHA-256 hash of the given content.
+ * @param content The content to hash
+ * @returns The hex-encoded hash
+ */
+export function computeContentHash(content: string): string {
+    return crypto.createHash("sha256").update(content).digest("hex");
+}
+
+/**
+ * Checks if the provided content matches the stored hash.
+ * @param content The current content
+ * @param storedHash The stored hash to compare against (undefined means no hash was stored)
+ * @returns true if the content matches the hash, or if no hash was stored; false otherwise
+ */
+export function contentMatchesHash(content: string, storedHash: string | undefined): boolean {
+    // If no hash was stored (backward compatibility), consider it as matching
+    if (storedHash === undefined) {
+        return true;
+    }
+    const currentHash = computeContentHash(content);
+    return currentHash === storedHash;
+}
+
+/**
+ * Checks if a location's content still matches its stored hash by reading the file.
+ * @param location The location to check
+ * @param rootPath The absolute root path for the workspace
+ * @returns true if the content matches the hash (or no hash was stored), false otherwise
+ */
+export function isLocationUpToDate(location: Location | FullLocation, rootPath: string): boolean {
+    try {
+        const fs = require("fs");
+        const path = require("path");
+        const fullPath = (location as FullLocation).rootPath
+            ? path.join((location as FullLocation).rootPath, location.path)
+            : path.join(rootPath, location.path);
+        const fileContent = fs.readFileSync(fullPath, "utf8");
+        const lines = fileContent.split("\n");
+        const regionContent = lines.slice(location.startLine, location.endLine + 1).join("\n");
+        return contentMatchesHash(regionContent, location.contentHash);
+    } catch (error) {
+        // If file doesn't exist or can't be read, consider it out of date
+        return false;
+    }
 }

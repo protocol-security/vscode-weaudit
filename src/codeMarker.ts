@@ -7,7 +7,8 @@ import { spawnSync } from "child_process";
 import { plot } from "asciichart";
 
 import { ResolvedEntries } from "./resolvedFindings";
-import { labelAfterFirstLineTextDecoration, hoverOnLabel, DecorationManager } from "./decorationManager";
+import { StaleReviews, StaleReviewItem } from "./staleReviews";
+import { labelAfterFirstLineTextDecoration, hoverOnLabel, reviewerLabelDecoration, DecorationManager } from "./decorationManager";
 import {
     Entry,
     FullEntry,
@@ -46,6 +47,8 @@ import {
     WorkspaceRootEntry,
     configEntryEquals,
     RootPathAndLabel,
+    computeContentHash,
+    contentMatchesHash,
 } from "./types";
 
 export const SERIALIZED_FILE_EXTENSION = ".weaudit";
@@ -565,7 +568,17 @@ class WARoot {
             urisToDecorate = this.checkIfAllSiblingFilesAreAudited(uri);
         } else {
             // if it doesn't exist, add it
-            this.auditedFiles.push({ path: relativePath, author: this.username });
+            // Compute content hash for the file
+            let contentHash: string | undefined;
+            try {
+                const fileContent = fs.readFileSync(uri.fsPath, "utf8");
+                contentHash = computeContentHash(fileContent);
+            } catch (error) {
+                console.error(`[weAudit] Failed to compute content hash for ${relativePath}:`, error);
+                contentHash = undefined;
+            }
+            const timestamp = new Date().toISOString();
+            this.auditedFiles.push({ path: relativePath, author: this.username, contentHash, timestamp });
             relevantUsername = this.username;
             urisToDecorate = this.checkIfAllSiblingFilesAreAudited(uri);
         }
@@ -762,17 +775,56 @@ class WARoot {
                     previousMarkedEntry.endLine = location.startLine - 1;
                     locationClone.startLine = location.endLine + 1;
 
+                    // Recompute content hash for the second split region
+                    try {
+                        const fileUri = vscode.Uri.file(path.join(this.rootPath, relativePath));
+                        const document = fs.readFileSync(fileUri.fsPath, "utf8");
+                        const lines = document.split("\n");
+                        const regionContent = lines.slice(locationClone.startLine, locationClone.endLine + 1).join("\n");
+                        locationClone.contentHash = computeContentHash(regionContent);
+                    } catch (error) {
+                        console.error(`[weAudit] Failed to compute content hash for split region:`, error);
+                        locationClone.contentHash = undefined;
+                    }
+
                     this.partiallyAuditedFiles.push(locationClone);
+                }
+
+                // Recompute content hash for the modified first region
+                try {
+                    const fileUri = vscode.Uri.file(path.join(this.rootPath, relativePath));
+                    const document = fs.readFileSync(fileUri.fsPath, "utf8");
+                    const lines = document.split("\n");
+                    const regionContent = lines.slice(previousMarkedEntry.startLine, previousMarkedEntry.endLine + 1).join("\n");
+                    previousMarkedEntry.contentHash = computeContentHash(regionContent);
+                } catch (error) {
+                    console.error(`[weAudit] Failed to compute content hash for modified region:`, error);
+                    previousMarkedEntry.contentHash = undefined;
                 }
 
                 this.partiallyAuditedFiles[alreadyMarked] = previousMarkedEntry;
             }
         } else {
+            // Compute content hash for the selected region
+            let contentHash: string | undefined;
+            try {
+                const fileUri = vscode.Uri.file(path.join(this.rootPath, relativePath));
+                const document = fs.readFileSync(fileUri.fsPath, "utf8");
+                const lines = document.split("\n");
+                const regionContent = lines.slice(location.startLine, location.endLine + 1).join("\n");
+                contentHash = computeContentHash(regionContent);
+            } catch (error) {
+                console.error(`[weAudit] Failed to compute content hash for partially audited region in ${relativePath}:`, error);
+                contentHash = undefined;
+            }
+            const timestamp = new Date().toISOString();
             this.partiallyAuditedFiles.push({
                 path: relativePath,
                 author: this.username,
                 startLine: location.startLine,
                 endLine: location.endLine,
+                contentHash,
+                timestamp,
             });
         }
 
@@ -806,8 +858,213 @@ class WARoot {
         }
 
         const relativePath = path.relative(this.rootPath, uri.fsPath);
+
+        // Compute content hash for the selected region
+        let contentHash: string | undefined;
+        try {
+            const document = editor.document.getText();
+            const lines = document.split("\n");
+            const regionContent = lines.slice(startLine, endLine + 1).join("\n");
+            contentHash = computeContentHash(regionContent);
+        } catch (error) {
+            console.error(`[weAudit] Failed to compute content hash for location in ${relativePath}:`, error);
+            contentHash = undefined;
+        }
+
         // TODO: error if not in this workspace root?
-        return { path: relativePath, startLine, endLine, label: "", description: "", rootPath: this.rootPath };
+        return { path: relativePath, startLine, endLine, label: "", description: "", rootPath: this.rootPath, contentHash };
+    }
+
+    /**
+     * Checks if an audited file's content still matches its stored hash.
+     * @param auditedFile The audited file to check
+     * @returns true if the content matches the hash (or no hash was stored), false otherwise
+     */
+    isAuditedFileUpToDate(auditedFile: AuditedFile): boolean {
+        try {
+            const filePath = path.join(this.rootPath, auditedFile.path);
+            const fileContent = fs.readFileSync(filePath, "utf8");
+            return contentMatchesHash(fileContent, auditedFile.contentHash);
+        } catch (error) {
+            // If file doesn't exist or can't be read, consider it out of date
+            return false;
+        }
+    }
+
+    /**
+     * Checks if a partially audited file's content still matches its stored hash.
+     * Attempts to relocate the region if it has moved due to insertions/deletions.
+     * @param partiallyAuditedFile The partially audited file region to check
+     * @returns true if the content matches the hash (or no hash was stored), false otherwise
+     */
+    isPartiallyAuditedFileUpToDate(partiallyAuditedFile: PartiallyAuditedFile): boolean {
+        try {
+            const filePath = path.join(this.rootPath, partiallyAuditedFile.path);
+            const fileContent = fs.readFileSync(filePath, "utf8");
+            const lines = fileContent.split("\n");
+            const regionContent = lines.slice(partiallyAuditedFile.startLine, partiallyAuditedFile.endLine + 1).join("\n");
+
+            // First check if content is still at the original location
+            if (contentMatchesHash(regionContent, partiallyAuditedFile.contentHash)) {
+                return true;
+            }
+
+            // If not at original location, try to relocate it
+            const newLocation = this.tryRelocateRegionByHash(
+                fileContent,
+                partiallyAuditedFile.startLine,
+                partiallyAuditedFile.endLine,
+                partiallyAuditedFile.contentHash
+            );
+
+            if (newLocation !== undefined) {
+                // Found the region at a new location - update the line numbers
+                console.log(
+                    `[weAudit] Auto-relocated partially audited region in ${partiallyAuditedFile.path} ` +
+                    `from lines ${partiallyAuditedFile.startLine}-${partiallyAuditedFile.endLine} ` +
+                    `to lines ${newLocation.startLine}-${newLocation.endLine}`
+                );
+                partiallyAuditedFile.startLine = newLocation.startLine;
+                partiallyAuditedFile.endLine = newLocation.endLine;
+                return true;
+            }
+
+            // Could not relocate - mark as out of date
+            return false;
+        } catch (error) {
+            // If file doesn't exist or can't be read, consider it out of date
+            return false;
+        }
+    }
+
+    /**
+     * Helper method to search for content by hash across the entire file.
+     * @param fileContent The full file content
+     * @param originalStartLine The original start line (used to determine region length)
+     * @param originalEndLine The original end line (used to determine region length)
+     * @param storedHash The hash to match
+     * @returns The new line numbers if found uniquely, or undefined if not found or ambiguous
+     */
+    private tryRelocateRegionByHash(
+        fileContent: string,
+        originalStartLine: number,
+        originalEndLine: number,
+        storedHash: string | undefined
+    ): { startLine: number; endLine: number } | undefined {
+        if (storedHash === undefined) {
+            return undefined; // Can't relocate without a hash
+        }
+
+        const lines = fileContent.split("\n");
+        const regionLength = originalEndLine - originalStartLine + 1;
+
+        const matches: { startLine: number; endLine: number }[] = [];
+
+        // Search the entire file for regions that match the hash
+        for (let i = 0; i <= lines.length - regionLength; i++) {
+            const candidateContent = lines.slice(i, i + regionLength).join("\n");
+            if (computeContentHash(candidateContent) === storedHash) {
+                matches.push({ startLine: i, endLine: i + regionLength - 1 });
+            }
+        }
+
+        // Only return if we found exactly one match (unambiguous)
+        if (matches.length === 1) {
+            return matches[0];
+        }
+
+        // If multiple matches or no matches, we can't reliably relocate
+        return undefined;
+    }
+
+    /**
+     * Updates the content hash for an audited file to match the current file content.
+     * Also updates the timestamp to reflect when the review was re-validated.
+     * @param filePath The relative path of the file
+     * @returns true if successful, false otherwise
+     */
+    updateAuditedFileHash(filePath: string): boolean {
+        try {
+            const index = this.auditedFiles.findIndex((f) => f.path === filePath);
+            if (index === -1) {
+                return false;
+            }
+
+            const fullPath = path.join(this.rootPath, filePath);
+            const fileContent = fs.readFileSync(fullPath, "utf8");
+            const newHash = computeContentHash(fileContent);
+
+            this.auditedFiles[index].contentHash = newHash;
+            this.auditedFiles[index].timestamp = new Date().toISOString();
+            return true;
+        } catch (error) {
+            console.error(`[weAudit] Failed to update hash for audited file ${filePath}:`, error);
+            return false;
+        }
+    }
+
+    /**
+     * Updates the content hash for a partially audited region to match the current content.
+     * Also updates the timestamp to reflect when the review was re-validated.
+     * @param filePath The relative path of the file
+     * @param startLine The start line of the region
+     * @param endLine The end line of the region
+     * @returns true if successful, false otherwise
+     */
+    updatePartiallyAuditedFileHash(filePath: string, startLine: number, endLine: number): boolean {
+        try {
+            const index = this.partiallyAuditedFiles.findIndex(
+                (f) => f.path === filePath && f.startLine === startLine && f.endLine === endLine
+            );
+            if (index === -1) {
+                return false;
+            }
+
+            const fullPath = path.join(this.rootPath, filePath);
+            const fileContent = fs.readFileSync(fullPath, "utf8");
+            const lines = fileContent.split("\n");
+            const regionContent = lines.slice(startLine, endLine + 1).join("\n");
+            const newHash = computeContentHash(regionContent);
+
+            this.partiallyAuditedFiles[index].contentHash = newHash;
+            this.partiallyAuditedFiles[index].timestamp = new Date().toISOString();
+            return true;
+        } catch (error) {
+            console.error(`[weAudit] Failed to update hash for partially audited region in ${filePath}:`, error);
+            return false;
+        }
+    }
+
+    /**
+     * Removes an audited file from the list.
+     * @param filePath The relative path of the file to remove
+     * @returns true if successful, false otherwise
+     */
+    removeAuditedFile(filePath: string): boolean {
+        const index = this.auditedFiles.findIndex((f) => f.path === filePath);
+        if (index === -1) {
+            return false;
+        }
+        this.auditedFiles.splice(index, 1);
+        return true;
+    }
+
+    /**
+     * Removes a partially audited region from the list.
+     * @param filePath The relative path of the file
+     * @param startLine The start line of the region
+     * @param endLine The end line of the region
+     * @returns true if successful, false otherwise
+     */
+    removePartiallyAuditedFile(filePath: string, startLine: number, endLine: number): boolean {
+        const index = this.partiallyAuditedFiles.findIndex(
+            (f) => f.path === filePath && f.startLine === startLine && f.endLine === endLine
+        );
+        if (index === -1) {
+            return false;
+        }
+        this.partiallyAuditedFiles.splice(index, 1);
+        return true;
     }
 
     /**
@@ -1614,6 +1871,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
     readonly onDidChangeTreeData = this._onDidChangeTreeDataEmitter.event;
 
     private resolvedEntriesTree: ResolvedEntries;
+    private staleReviewsTree: StaleReviews;
 
     private decorationManager: DecorationManager;
 
@@ -1636,6 +1894,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
         this.username = this.setUsernameConfigOrDefault();
         this.findAndLoadConfigurationUsernames();
         this.resolvedEntriesTree = new ResolvedEntries(context, this.resolvedEntries);
+        this.staleReviewsTree = new StaleReviews(context, []);
 
         vscode.commands.executeCommand("weAudit.refreshSavedFindings", this.workspaces.getSelectedConfigurations());
 
@@ -1711,6 +1970,14 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
 
         vscode.commands.registerCommand("weAudit.addPartiallyAudited", () => {
             this.addPartiallyAudited();
+        });
+
+        vscode.commands.registerCommand("weAudit.updateStaleReview", (node: StaleReviewItem) => {
+            this.updateStaleReview(node);
+        });
+
+        vscode.commands.registerCommand("weAudit.deleteStaleReview", (node: StaleReviewItem) => {
+            this.deleteStaleReview(node);
         });
 
         vscode.commands.registerCommand("weAudit.toggleTreeViewMode", () => {
@@ -2342,6 +2609,64 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
         // update decorations
         this.decorateWithUri(uri);
         this.updateSavedData(this.username);
+    }
+
+    /**
+     * Updates the content hash for a stale review to accept the current changes.
+     * @param staleItem The stale review item to update
+     */
+    updateStaleReview(staleItem: StaleReviewItem): void {
+        const [wsRoot, _relativePath] = this.workspaces.getCorrespondingRootAndPath(path.join(staleItem.rootPath, staleItem.path));
+        if (wsRoot === undefined) {
+            vscode.window.showErrorMessage(`weAudit: Could not find workspace root for ${staleItem.path}`);
+            return;
+        }
+
+        let success = false;
+        if (staleItem.type === "file") {
+            success = wsRoot.updateAuditedFileHash(staleItem.path);
+        } else if (staleItem.type === "region" && staleItem.startLine !== undefined && staleItem.endLine !== undefined) {
+            success = wsRoot.updatePartiallyAuditedFileHash(staleItem.path, staleItem.startLine, staleItem.endLine);
+        }
+
+        if (success) {
+            this.updateSavedData(staleItem.author);
+            const uri = vscode.Uri.file(path.join(staleItem.rootPath, staleItem.path));
+            this._onDidChangeFileDecorationsEmitter.fire(uri);
+            this.decorateWithUri(uri);
+            vscode.window.showInformationMessage(`Review updated for ${path.basename(staleItem.path)}`);
+        } else {
+            vscode.window.showErrorMessage(`Failed to update review for ${staleItem.path}`);
+        }
+    }
+
+    /**
+     * Deletes a stale review entirely, requiring the reviewer to re-review the content.
+     * @param staleItem The stale review item to delete
+     */
+    deleteStaleReview(staleItem: StaleReviewItem): void {
+        const [wsRoot, _relativePath] = this.workspaces.getCorrespondingRootAndPath(path.join(staleItem.rootPath, staleItem.path));
+        if (wsRoot === undefined) {
+            vscode.window.showErrorMessage(`weAudit: Could not find workspace root for ${staleItem.path}`);
+            return;
+        }
+
+        let success = false;
+        if (staleItem.type === "file") {
+            success = wsRoot.removeAuditedFile(staleItem.path);
+        } else if (staleItem.type === "region" && staleItem.startLine !== undefined && staleItem.endLine !== undefined) {
+            success = wsRoot.removePartiallyAuditedFile(staleItem.path, staleItem.startLine, staleItem.endLine);
+        }
+
+        if (success) {
+            this.updateSavedData(staleItem.author);
+            const uri = vscode.Uri.file(path.join(staleItem.rootPath, staleItem.path));
+            this._onDidChangeFileDecorationsEmitter.fire(uri);
+            this.decorateWithUri(uri);
+            vscode.window.showInformationMessage(`Review deleted for ${path.basename(staleItem.path)}`);
+        } else {
+            vscode.window.showErrorMessage(`Failed to delete review for ${staleItem.path}`);
+        }
     }
 
     private navigateToNextPartiallyAuditedRegion(): void {
@@ -3349,6 +3674,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
 
         let hasFindings = false;
         let isAudited = false;
+        let isStale = false;
 
         const allRootsAndPaths: [WARoot, string][] = [];
         if (!inMultipleRoots) {
@@ -3374,12 +3700,30 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
         }
         // check if there is an entry for this file in the audited files
         for (const [wsRoot, relativePath] of allRootsAndPaths) {
-            if (wsRoot.isAudited(relativePath)) {
+            const auditedFile = wsRoot["auditedFiles"].find((f: AuditedFile) => f.path === relativePath);
+            if (auditedFile) {
                 isAudited = true;
+                // Check if the audited file is out of date
+                if (!wsRoot.isAuditedFileUpToDate(auditedFile)) {
+                    isStale = true;
+                }
+            }
+            // Check if any partially audited regions are stale
+            const partiallyAuditedFiles = wsRoot.getPartiallyAudited().filter((entry) => entry.path === relativePath);
+            for (const paf of partiallyAuditedFiles) {
+                if (!wsRoot.isPartiallyAuditedFileUpToDate(paf)) {
+                    isStale = true;
+                    break;
+                }
             }
         }
 
-        if (isAudited) {
+        if (isStale) {
+            return {
+                badge: "⚠",
+                tooltip: "Review is out of date - content has changed",
+            };
+        } else if (isAudited) {
             if (hasFindings) {
                 return {
                     badge: "✓!",
@@ -3400,12 +3744,143 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
     }
 
     /**
+     * Attempts to relocate a location if its content has moved.
+     * @param location The location to check and potentially relocate
+     * @returns true if the location is up to date or was successfully relocated, false otherwise
+     */
+    private tryRelocateLocation(location: FullLocation): boolean {
+        try {
+            const filePath = path.join(location.rootPath, location.path);
+            const fileContent = fs.readFileSync(filePath, "utf8");
+            const lines = fileContent.split("\n");
+            const regionContent = lines.slice(location.startLine, location.endLine + 1).join("\n");
+
+            // First check if content is still at the original location
+            if (contentMatchesHash(regionContent, location.contentHash)) {
+                return true;
+            }
+
+            // If not at original location, try to relocate it
+            const newLocation = this.tryRelocateRegionByHash(
+                fileContent,
+                location.startLine,
+                location.endLine,
+                location.contentHash
+            );
+
+            if (newLocation !== undefined) {
+                // Found the region at a new location - update the line numbers
+                console.log(
+                    `[weAudit] Auto-relocated location in ${location.path} ` +
+                    `from lines ${location.startLine}-${location.endLine} ` +
+                    `to lines ${newLocation.startLine}-${newLocation.endLine}`
+                );
+                location.startLine = newLocation.startLine;
+                location.endLine = newLocation.endLine;
+                return true;
+            }
+
+            // Could not relocate
+            return false;
+        } catch (error) {
+            return false;
+        }
+    }
+
+
+    /**
+     * Collects all stale reviews (audited files and partially audited regions that are out of date)
+     * from all workspace roots.
+     * @returns An array of StaleReviewItem objects
+     */
+    private collectStaleReviews(): StaleReviewItem[] {
+        const staleItems: StaleReviewItem[] = [];
+        const authorsToSave = new Set<string>();
+
+        for (const wsRoot of this.workspaces.getRoots()) {
+            // Check fully audited files
+            for (const auditedFile of wsRoot["auditedFiles"]) {
+                if (!wsRoot.isAuditedFileUpToDate(auditedFile)) {
+                    staleItems.push({
+                        type: "file",
+                        path: auditedFile.path,
+                        rootPath: wsRoot.rootPath,
+                        author: auditedFile.author,
+                    });
+                }
+            }
+
+            // Check partially audited regions (with relocation)
+            for (const partiallyAudited of wsRoot.getPartiallyAudited()) {
+                // Store original line numbers to detect if relocation happened
+                const originalStartLine = partiallyAudited.startLine;
+                const originalEndLine = partiallyAudited.endLine;
+
+                const wasUpToDate = wsRoot.isPartiallyAuditedFileUpToDate(partiallyAudited);
+
+                // Check if relocation happened (line numbers changed)
+                if (wasUpToDate && (partiallyAudited.startLine !== originalStartLine || partiallyAudited.endLine !== originalEndLine)) {
+                    // Region was relocated - need to save
+                    authorsToSave.add(partiallyAudited.author);
+                }
+
+                if (!wasUpToDate) {
+                    staleItems.push({
+                        type: "region",
+                        path: partiallyAudited.path,
+                        rootPath: wsRoot.rootPath,
+                        author: partiallyAudited.author,
+                        startLine: partiallyAudited.startLine,
+                        endLine: partiallyAudited.endLine,
+                    });
+                }
+            }
+        }
+
+        // Try to relocate finding/note locations
+        for (const entry of this.treeEntries) {
+            let entryModified = false;
+            for (const location of entry.locations) {
+                const wasUpToDate = this.tryRelocateLocation(location);
+                if (!wasUpToDate) {
+                    // Location could not be relocated - it's stale
+                    // We don't add findings to stale reviews currently, but the relocation attempt was made
+                } else if (location.contentHash) {
+                    // Check if it was relocated (content hash exists and location was updated)
+                    entryModified = true;
+                }
+            }
+            if (entryModified) {
+                authorsToSave.add(entry.author);
+            }
+        }
+
+        // Save if any relocations happened
+        if (authorsToSave.size > 0) {
+            for (const author of authorsToSave) {
+                this.updateSavedData(author);
+            }
+        }
+
+        return staleItems;
+    }
+
+    /**
+     * Updates the stale reviews tree view with current stale items.
+     */
+    updateStaleReviews(): void {
+        const staleItems = this.collectStaleReviews();
+        this.staleReviewsTree.setStaleItems(staleItems);
+    }
+
+    /**
      * Redecorates all currently visible editors based on the current treeEntries.
      */
     decorate(): void {
         vscode.window.visibleTextEditors.forEach((editor) => {
             this.decorateEditor(editor);
         });
+        this.updateStaleReviews();
     }
 
     /**
@@ -3418,6 +3893,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                 this.decorateEditor(editor);
             }
         });
+        this.updateStaleReviews();
     }
 
     /**
@@ -3486,21 +3962,52 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
         editor.setDecorations(this.decorationManager.ownNoteDecorationType, ownNoteDecorations);
         editor.setDecorations(this.decorationManager.otherNoteDecorationType, otherNoteDecorations);
 
-        editor.setDecorations(this.decorationManager.emptyDecorationType, labelDecorations);
-
         // check if editor is audited, and mark it as such
         let range: vscode.Range[] = [];
+        let staleRange: vscode.Range[] = [];
         const partiallyAuditedFiles: PartiallyAuditedFile[] = [];
+        const fullFileReviewerLabels: vscode.DecorationOptions[] = [];
+
         for (const [wsRoot, fname] of allRootsAndPaths) {
-            if (wsRoot.isAudited(fname)) {
-                range = [new vscode.Range(0, 0, editor.document.lineCount, 0)];
+            const auditedFile = wsRoot["auditedFiles"].find((f: AuditedFile) => f.path === fname);
+            if (auditedFile) {
+                const isUpToDate = wsRoot.isAuditedFileUpToDate(auditedFile);
+                if (isUpToDate) {
+                    range = [new vscode.Range(0, 0, editor.document.lineCount, 0)];
+                    // Add reviewer label at the top of the file
+                    fullFileReviewerLabels.push(reviewerLabelDecoration(0, auditedFile.author, auditedFile.timestamp));
+                } else {
+                    staleRange = [new vscode.Range(0, 0, editor.document.lineCount, 0)];
+                }
             }
             partiallyAuditedFiles.push(...wsRoot.getPartiallyAudited().filter((entry) => entry.path === fname));
         }
 
         // check if editor is partially audited, and mark locations as such
-        const partiallyAuditedDecorations = partiallyAuditedFiles.map((r) => new vscode.Range(r.startLine, 0, r.endLine, 0));
-        editor.setDecorations(this.decorationManager.auditedFileDecorationType, range.concat(partiallyAuditedDecorations));
+        // Separate up-to-date and stale partial audits
+        const partiallyAuditedDecorations: vscode.DecorationOptions[] = [];
+        const stalePartiallyAuditedDecorations: vscode.DecorationOptions[] = [];
+        const reviewerLabels: vscode.DecorationOptions[] = [];
+
+        for (const [wsRoot, _fname] of allRootsAndPaths) {
+            for (const paf of partiallyAuditedFiles) {
+                const isUpToDate = wsRoot.isPartiallyAuditedFileUpToDate(paf);
+                const decoration = {
+                    range: new vscode.Range(paf.startLine, 0, paf.endLine, 0)
+                };
+                if (isUpToDate) {
+                    partiallyAuditedDecorations.push(decoration);
+                    // Add reviewer label at the end of the region
+                    reviewerLabels.push(reviewerLabelDecoration(paf.endLine, paf.author, paf.timestamp));
+                } else {
+                    stalePartiallyAuditedDecorations.push(decoration);
+                }
+            }
+        }
+
+        editor.setDecorations(this.decorationManager.auditedFileDecorationType, range.map(r => ({ range: r })).concat(partiallyAuditedDecorations));
+        editor.setDecorations(this.decorationManager.staleAuditedFileDecorationType, staleRange.map(r => ({ range: r })).concat(stalePartiallyAuditedDecorations));
+        editor.setDecorations(this.decorationManager.emptyDecorationType, labelDecorations.concat(reviewerLabels).concat(fullFileReviewerLabels));
     }
 
     /**
