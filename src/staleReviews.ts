@@ -4,12 +4,14 @@ import * as path from "path";
 import { AuditedFile, PartiallyAuditedFile } from "./types";
 
 export interface StaleReviewItem {
-    type: "file" | "region";
+    type: "file" | "region" | "finding";
     path: string;
     rootPath: string;
     author: string;
     startLine?: number;
     endLine?: number;
+    entryLabel?: string;  // For findings: the title of the finding
+    entryType?: string;   // For findings: the type of entry (Finding or Note)
 }
 
 export class StaleReviewsTree implements vscode.TreeDataProvider<StaleReviewItem> {
@@ -44,9 +46,24 @@ export class StaleReviewsTree implements vscode.TreeDataProvider<StaleReviewItem
     }
 
     getTreeItem(item: StaleReviewItem): vscode.TreeItem {
-        const label = item.type === "file"
-            ? path.basename(item.path)
-            : `${path.basename(item.path)}:${item.startLine}-${item.endLine}`;
+        let label: string;
+        let description: string;
+        let tooltip: string;
+
+        if (item.type === "file") {
+            label = path.basename(item.path);
+            description = "Full file";
+            tooltip = `${item.path} - reviewed by ${item.author}\nContent has changed since review`;
+        } else if (item.type === "finding") {
+            label = item.entryLabel || "Untitled Finding";
+            description = `${path.basename(item.path)}:${item.startLine}-${item.endLine}`;
+            tooltip = `${item.entryLabel || "Finding"} - by ${item.author}\n${item.path}:${item.startLine}-${item.endLine}\nContent has changed since creation`;
+        } else {
+            // region
+            label = `${path.basename(item.path)}:${item.startLine}-${item.endLine}`;
+            description = `Lines ${item.startLine}-${item.endLine}`;
+            tooltip = `${item.path} - reviewed by ${item.author}\nContent has changed since review`;
+        }
 
         const treeItem = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None);
         treeItem.iconPath = new vscode.ThemeIcon("warning", new vscode.ThemeColor("problemsWarningIcon.foreground"));
@@ -61,8 +78,8 @@ export class StaleReviewsTree implements vscode.TreeDataProvider<StaleReviewItem
             arguments: [vscode.Uri.file(fullPath), startLine, endLine],
         };
 
-        treeItem.description = item.type === "file" ? "Full file" : `Lines ${item.startLine}-${item.endLine}`;
-        treeItem.tooltip = `${item.path} - reviewed by ${item.author}\nContent has changed since review`;
+        treeItem.description = description;
+        treeItem.tooltip = tooltip;
 
         return treeItem;
     }

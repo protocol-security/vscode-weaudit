@@ -8,7 +8,7 @@ import { plot } from "asciichart";
 
 import { ResolvedEntries } from "./resolvedFindings";
 import { StaleReviews, StaleReviewItem } from "./staleReviews";
-import { labelAfterFirstLineTextDecoration, hoverOnLabel, reviewerLabelDecoration, DecorationManager } from "./decorationManager";
+import { labelAfterFirstLineTextDecoration, hoverOnLabel, reviewerLabelDecoration, findingLabelDecoration, DecorationManager } from "./decorationManager";
 import {
     Entry,
     FullEntry,
@@ -871,8 +871,10 @@ class WARoot {
             contentHash = undefined;
         }
 
+        const timestamp = new Date().toISOString();
+
         // TODO: error if not in this workspace root?
-        return { path: relativePath, startLine, endLine, label: "", description: "", rootPath: this.rootPath, contentHash };
+        return { path: relativePath, startLine, endLine, label: "", description: "", rootPath: this.rootPath, contentHash, timestamp };
     }
 
     /**
@@ -1207,6 +1209,8 @@ class WARoot {
                                 endLine: location.endLine,
                                 label: location.label,
                                 description: location.description,
+                                contentHash: location.contentHash,
+                                timestamp: location.timestamp,
                             }) as Location,
                     ),
                 }) as Entry,
@@ -1226,6 +1230,8 @@ class WARoot {
                                 endLine: location.endLine,
                                 label: location.label,
                                 description: location.description,
+                                contentHash: location.contentHash,
+                                timestamp: location.timestamp,
                             }) as Location,
                     ),
                 }) as Entry,
@@ -2612,6 +2618,86 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
     }
 
     /**
+     * Updates the content hash for a finding location.
+     * @param rootPath The root path of the workspace
+     * @param filePath The relative path of the file
+     * @param startLine The start line of the location
+     * @param endLine The end line of the location
+     * @returns true if successful, false otherwise
+     */
+    private updateFindingLocationHash(rootPath: string, filePath: string, startLine: number, endLine: number): boolean {
+        try {
+            // Find the entry with this location
+            for (const entry of this.treeEntries) {
+                for (const location of entry.locations) {
+                    if (
+                        location.rootPath === rootPath &&
+                        location.path === filePath &&
+                        location.startLine === startLine &&
+                        location.endLine === endLine
+                    ) {
+                        // Recompute the hash for the current content
+                        const fullPath = path.join(rootPath, filePath);
+                        const fileContent = fs.readFileSync(fullPath, "utf8");
+                        const lines = fileContent.split("\n");
+                        const regionContent = lines.slice(startLine, endLine + 1).join("\n");
+                        location.contentHash = computeContentHash(regionContent);
+                        location.timestamp = new Date().toISOString();
+                        return true;
+                    }
+                }
+            }
+            return false;
+        } catch (error) {
+            console.error(`[weAudit] Failed to update hash for finding location in ${filePath}:`, error);
+            return false;
+        }
+    }
+
+    /**
+     * Deletes a finding location. If it's the only location in the finding, deletes the entire finding.
+     * @param rootPath The root path of the workspace
+     * @param filePath The relative path of the file
+     * @param startLine The start line of the location
+     * @param endLine The end line of the location
+     * @param author The author of the finding
+     * @returns true if successful, false otherwise
+     */
+    private deleteFindingLocation(rootPath: string, filePath: string, startLine: number, endLine: number, author: string): boolean {
+        // Find the entry with this location
+        for (let i = 0; i < this.treeEntries.length; i++) {
+            const entry = this.treeEntries[i];
+            if (entry.author !== author) {
+                continue;
+            }
+
+            // Find the location within this entry
+            for (let j = 0; j < entry.locations.length; j++) {
+                const location = entry.locations[j];
+                if (
+                    location.rootPath === rootPath &&
+                    location.path === filePath &&
+                    location.startLine === startLine &&
+                    location.endLine === endLine
+                ) {
+                    // Found the location
+                    if (entry.locations.length === 1) {
+                        // This is the only location - delete the entire entry
+                        this.treeEntries.splice(i, 1);
+                        this.refreshTree();
+                    } else {
+                        // Remove just this location
+                        entry.locations.splice(j, 1);
+                        this.refreshEntry(entry);
+                    }
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * Updates the content hash for a stale review to accept the current changes.
      * @param staleItem The stale review item to update
      */
@@ -2627,6 +2713,9 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             success = wsRoot.updateAuditedFileHash(staleItem.path);
         } else if (staleItem.type === "region" && staleItem.startLine !== undefined && staleItem.endLine !== undefined) {
             success = wsRoot.updatePartiallyAuditedFileHash(staleItem.path, staleItem.startLine, staleItem.endLine);
+        } else if (staleItem.type === "finding" && staleItem.startLine !== undefined && staleItem.endLine !== undefined) {
+            // Update content hash for the finding location
+            success = this.updateFindingLocationHash(staleItem.rootPath, staleItem.path, staleItem.startLine, staleItem.endLine);
         }
 
         if (success) {
@@ -2634,9 +2723,10 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             const uri = vscode.Uri.file(path.join(staleItem.rootPath, staleItem.path));
             this._onDidChangeFileDecorationsEmitter.fire(uri);
             this.decorateWithUri(uri);
-            vscode.window.showInformationMessage(`Review updated for ${path.basename(staleItem.path)}`);
+            const itemType = staleItem.type === "finding" ? "finding" : "review";
+            vscode.window.showInformationMessage(`${itemType.charAt(0).toUpperCase() + itemType.slice(1)} updated for ${path.basename(staleItem.path)}`);
         } else {
-            vscode.window.showErrorMessage(`Failed to update review for ${staleItem.path}`);
+            vscode.window.showErrorMessage(`Failed to update ${staleItem.type} for ${staleItem.path}`);
         }
     }
 
@@ -2656,6 +2746,9 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             success = wsRoot.removeAuditedFile(staleItem.path);
         } else if (staleItem.type === "region" && staleItem.startLine !== undefined && staleItem.endLine !== undefined) {
             success = wsRoot.removePartiallyAuditedFile(staleItem.path, staleItem.startLine, staleItem.endLine);
+        } else if (staleItem.type === "finding" && staleItem.startLine !== undefined && staleItem.endLine !== undefined) {
+            // Delete the finding location (or entire finding if it's the only location)
+            success = this.deleteFindingLocation(staleItem.rootPath, staleItem.path, staleItem.startLine, staleItem.endLine, staleItem.author);
         }
 
         if (success) {
@@ -2663,9 +2756,10 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             const uri = vscode.Uri.file(path.join(staleItem.rootPath, staleItem.path));
             this._onDidChangeFileDecorationsEmitter.fire(uri);
             this.decorateWithUri(uri);
-            vscode.window.showInformationMessage(`Review deleted for ${path.basename(staleItem.path)}`);
+            const itemType = staleItem.type === "finding" ? "finding" : "review";
+            vscode.window.showInformationMessage(`${itemType.charAt(0).toUpperCase() + itemType.slice(1)} deleted for ${path.basename(staleItem.path)}`);
         } else {
-            vscode.window.showErrorMessage(`Failed to delete review for ${staleItem.path}`);
+            vscode.window.showErrorMessage(`Failed to delete ${staleItem.type} for ${staleItem.path}`);
         }
     }
 
@@ -3570,6 +3664,8 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                                     endLine: loc.endLine,
                                     label: loc.label,
                                     description: loc.description,
+                                    contentHash: loc.contentHash,
+                                    timestamp: loc.timestamp,
                                     rootPath: rootPath,
                                 }) as FullLocation,
                         ),
@@ -3593,6 +3689,8 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                                     endLine: loc.endLine,
                                     label: loc.label,
                                     description: loc.description,
+                                    contentHash: loc.contentHash,
+                                    timestamp: loc.timestamp,
                                     rootPath: rootPath,
                                 }) as FullLocation,
                         ),
@@ -3744,6 +3842,46 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
     }
 
     /**
+     * Helper method to search for content by hash across the entire file.
+     * @param fileContent The full file content
+     * @param originalStartLine The original start line (used to determine region length)
+     * @param originalEndLine The original end line
+     * @param storedHash The stored content hash
+     * @returns New location if found unambiguously, undefined otherwise
+     */
+    private tryRelocateRegionByHash(
+        fileContent: string,
+        originalStartLine: number,
+        originalEndLine: number,
+        storedHash: string | undefined
+    ): { startLine: number; endLine: number } | undefined {
+        if (storedHash === undefined) {
+            return undefined; // Can't relocate without a hash
+        }
+
+        const lines = fileContent.split("\n");
+        const regionLength = originalEndLine - originalStartLine + 1;
+
+        const matches: { startLine: number; endLine: number }[] = [];
+
+        // Search the entire file for regions that match the hash
+        for (let i = 0; i <= lines.length - regionLength; i++) {
+            const candidateContent = lines.slice(i, i + regionLength).join("\n");
+            if (computeContentHash(candidateContent) === storedHash) {
+                matches.push({ startLine: i, endLine: i + regionLength - 1 });
+            }
+        }
+
+        // Only return if we found exactly one match (unambiguous)
+        if (matches.length === 1) {
+            return matches[0];
+        }
+
+        // If multiple matches or no matches, we can't reliably relocate
+        return undefined;
+    }
+
+    /**
      * Attempts to relocate a location if its content has moved.
      * @param location The location to check and potentially relocate
      * @returns true if the location is up to date or was successfully relocated, false otherwise
@@ -3794,6 +3932,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
      * @returns An array of StaleReviewItem objects
      */
     private collectStaleReviews(): StaleReviewItem[] {
+        console.log('[weAudit] collectStaleReviews() called');
         const staleItems: StaleReviewItem[] = [];
         const authorsToSave = new Set<string>();
 
@@ -3841,13 +3980,32 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
         for (const entry of this.treeEntries) {
             let entryModified = false;
             for (const location of entry.locations) {
+                console.log(`[weAudit] Checking finding/note location: ${location.path} lines ${location.startLine}-${location.endLine}, hash: ${location.contentHash ? 'present' : 'missing'}`);
+
+                // Store original line numbers to detect if relocation happened
+                const originalStartLine = location.startLine;
+                const originalEndLine = location.endLine;
+
                 const wasUpToDate = this.tryRelocateLocation(location);
+
+                // Check if relocation happened (line numbers changed)
+                if (wasUpToDate && (location.startLine !== originalStartLine || location.endLine !== originalEndLine)) {
+                    // Location was relocated - need to save
+                    entryModified = true;
+                }
+
                 if (!wasUpToDate) {
                     // Location could not be relocated - it's stale
-                    // We don't add findings to stale reviews currently, but the relocation attempt was made
-                } else if (location.contentHash) {
-                    // Check if it was relocated (content hash exists and location was updated)
-                    entryModified = true;
+                    staleItems.push({
+                        type: "finding",
+                        path: location.path,
+                        rootPath: location.rootPath,
+                        author: entry.author,
+                        startLine: location.startLine,
+                        endLine: location.endLine,
+                        entryLabel: entry.label,
+                        entryType: entry.entryType,
+                    });
                 }
             }
             if (entryModified) {
@@ -3997,8 +4155,8 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                 };
                 if (isUpToDate) {
                     partiallyAuditedDecorations.push(decoration);
-                    // Add reviewer label at the end of the region
-                    reviewerLabels.push(reviewerLabelDecoration(paf.endLine, paf.author, paf.timestamp));
+                    // Add reviewer label at the start of the region
+                    reviewerLabels.push(reviewerLabelDecoration(paf.startLine, paf.author, paf.timestamp));
                 } else {
                     stalePartiallyAuditedDecorations.push(decoration);
                 }
@@ -4710,6 +4868,15 @@ export class AuditMarker {
         vscode.window.onDidChangeActiveColorTheme(this.decorationManager.reloadAllDecorationConfigurations, this.decorationManager);
         vscode.workspace.onDidChangeConfiguration((e: vscode.ConfigurationChangeEvent) => {
             this.selectivelyReloadConfigurations(e);
+        });
+
+        // Listen for document saves to trigger auto-relocation
+        console.log('[weAudit] Registering document save listener for auto-relocation');
+        vscode.workspace.onDidSaveTextDocument((document: vscode.TextDocument) => {
+            // Check if this document has any findings or reviews that might need relocation
+            console.log(`[weAudit] Document saved: ${document.uri.fsPath}`);
+            const uri = document.uri;
+            this.decorateWithUri(uri);
         });
 
         // This event is triggered several times when dragging a file into a new column.

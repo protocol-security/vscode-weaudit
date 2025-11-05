@@ -201,3 +201,33 @@ export function reviewerLabelDecoration(line: number, author: string, timestamp?
         },
     };
 }
+
+/**
+ * Creates a text decoration for a finding/note showing the author.
+ * @param line the last line of the finding region
+ * @param author the author who created this finding
+ * @param timestamp optional timestamp when the finding was created
+ * @returns the text decoration
+ */
+export function findingLabelDecoration(line: number, author: string, timestamp?: string): vscode.DecorationOptions {
+    const timestampStr = formatTimestamp(timestamp);
+    return {
+        range: new vscode.Range(line, 0, line, Number.MAX_SAFE_INTEGER),
+        renderOptions: {
+            dark: {
+                after: {
+                    contentText: ("  ⓘ Created by " + author + timestampStr).replace(/ /g, SPACE),
+                    color: "#88aa8888",
+                    fontStyle: "italic",
+                },
+            },
+            light: {
+                after: {
+                    contentText: ("  ⓘ Created by " + author + timestampStr).replace(/ /g, SPACE),
+                    color: "#33663388",
+                    fontStyle: "italic",
+                },
+            },
+        },
+    };
+}

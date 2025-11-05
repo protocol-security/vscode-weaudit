@@ -245,6 +245,9 @@ export interface Location {
 
     /** The content hash of the code region (optional for backward compatibility) */
     contentHash?: string;
+
+    /** The timestamp when this location was created/updated (optional for backward compatibility) */
+    timestamp?: string;
 }
 
 /**
