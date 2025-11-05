@@ -212,7 +212,7 @@ export function createDefaultEntryDetails(): EntryDetails {
         type: FindingType.Undefined,
         description: "",
         exploit: "",
-        recommendation: "Short term, \nLong term, \n",
+        recommendation: "",
     };
 }
 

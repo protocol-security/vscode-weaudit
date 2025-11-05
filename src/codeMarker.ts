@@ -267,16 +267,11 @@ class WARoot {
 
         const filename = path.join(vscodeFolder, this.username + SERIALIZED_FILE_EXTENSION);
         let newData;
-        if (!fs.existsSync(filename)) {
+        const isNewFile = !fs.existsSync(filename);
+        if (isNewFile) {
             const dataToSerialize = createDefaultSerializedData();
             dataToSerialize.clientRemote = this.clientRemote;
             newData = JSON.stringify(dataToSerialize, null, 2);
-
-            // We are creating a new config file
-            const wsRootEntry = { label: this.rootLabel } as WorkspaceRootEntry;
-            const configEntry = { path: filename, username: this.username, root: wsRootEntry } as ConfigurationEntry;
-            this.configs.push(configEntry);
-            this.currentlySelectedConfigs.push(configEntry);
         } else {
             const data = fs.readFileSync(filename).toString();
             const parsedEntries: SerializedData = JSON.parse(data);
@@ -284,6 +279,11 @@ class WARoot {
             newData = JSON.stringify(parsedEntries, null, 2);
         }
         fs.writeFileSync(filename, newData, { flag: "w+" });
+
+        // If we created a new file, reload all configurations to pick up all existing configs
+        if (isNewFile) {
+            this.loadConfigurations();
+        }
     }
 
     /**
@@ -305,16 +305,11 @@ class WARoot {
 
         const filename = path.join(vscodeFolder, this.username + SERIALIZED_FILE_EXTENSION);
         let newData;
-        if (!fs.existsSync(filename)) {
+        const isNewFile = !fs.existsSync(filename);
+        if (isNewFile) {
             const dataToSerialize = createDefaultSerializedData();
             dataToSerialize.gitRemote = this.gitRemote;
             newData = JSON.stringify(dataToSerialize, null, 2);
-
-            // We are creating a new config file
-            const wsRootEntry = { label: this.rootLabel } as WorkspaceRootEntry;
-            const configEntry = { path: filename, username: this.username, root: wsRootEntry } as ConfigurationEntry;
-            this.configs.push(configEntry);
-            this.currentlySelectedConfigs.push(configEntry);
         } else {
             const data = fs.readFileSync(filename).toString();
             const parsedEntries: SerializedData = JSON.parse(data);
@@ -322,6 +317,11 @@ class WARoot {
             newData = JSON.stringify(parsedEntries, null, 2);
         }
         fs.writeFileSync(filename, newData, { flag: "w+" });
+
+        // If we created a new file, reload all configurations to pick up all existing configs
+        if (isNewFile) {
+            this.loadConfigurations();
+        }
     }
 
     /**
@@ -343,16 +343,11 @@ class WARoot {
 
         const filename = path.join(vscodeFolder, this.username + SERIALIZED_FILE_EXTENSION);
         let newData;
-        if (!fs.existsSync(filename)) {
+        const isNewFile = !fs.existsSync(filename);
+        if (isNewFile) {
             const dataToSerialize = createDefaultSerializedData();
             dataToSerialize.gitSha = this.gitSha;
             newData = JSON.stringify(dataToSerialize, null, 2);
-
-            // We are creating a new config file
-            const wsRootEntry = { label: this.rootLabel } as WorkspaceRootEntry;
-            const configEntry = { path: filename, username: this.username, root: wsRootEntry } as ConfigurationEntry;
-            this.configs.push(configEntry);
-            this.currentlySelectedConfigs.push(configEntry);
         } else {
             const data = fs.readFileSync(filename).toString();
             const parsedEntries: SerializedData = JSON.parse(data);
@@ -360,6 +355,11 @@ class WARoot {
             newData = JSON.stringify(parsedEntries, null, 2);
         }
         fs.writeFileSync(filename, newData, { flag: "w+" });
+
+        // If we created a new file, reload all configurations to pick up all existing configs
+        if (isNewFile) {
+            this.loadConfigurations();
+        }
     }
 
     /**
@@ -1260,16 +1260,11 @@ class WARoot {
             toCreateData = true;
         }
 
+        const isNewFile = !existsFile;
         if (toCreateData) {
             // create .vscode folder if it doesn't exist
             if (!existsFolder) {
                 fs.mkdirSync(vscodeFolder);
-            }
-
-            // create a new config file if it doesn't exist
-            if (!existsFile) {
-                this.configs.push(configEntry);
-                this.currentlySelectedConfigs.push(configEntry);
             }
         }
 
@@ -1291,6 +1286,11 @@ class WARoot {
                 2,
             );
             fs.writeFileSync(fileName, data, { flag: "w+" });
+
+            // If we created a new file, reload all configurations to pick up all existing configs
+            if (isNewFile && toCreateData) {
+                this.loadConfigurations();
+            }
         }
     }
 
