@@ -4148,7 +4148,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                     }
 
                     // add the author information
-                    const extraLabel = isOwnEntry ? "(you)" : "(" + treeItem.author + ")";
+                    const extraLabel = "(" + treeItem.author + ")";
                     const labelString =
                         treeItem.label === location.label ? `${treeItem.label}  ${extraLabel}` : `${treeItem.label} ${location.label}  ${extraLabel}`;
 
