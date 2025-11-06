@@ -211,6 +211,11 @@
                 "icon": "$(trash)"
             },
             {
+                "command": "weAudit.adjustStaleLines",
+                "title": "Adjust Lines",
+                "icon": "$(edit)"
+            },
+            {
                 "command": "weAudit.addFinding",
                 "title": "weAudit: New Finding from Selection"
             },
@@ -516,6 +521,11 @@
                     "command": "weAudit.deleteStaleReview",
                     "when": "view == staleReviews",
                     "group": "inline@2"
+                },
+                {
+                    "command": "weAudit.adjustStaleLines",
+                    "when": "view == staleReviews",
+                    "group": "inline@3"
                 }
             ],
             "editor/context": [

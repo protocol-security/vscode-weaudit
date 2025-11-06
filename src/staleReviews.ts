@@ -50,18 +50,22 @@ export class StaleReviewsTree implements vscode.TreeDataProvider<StaleReviewItem
         let description: string;
         let tooltip: string;
 
+        // Convert line numbers to 1-indexed for display (matching editor UI)
+        const displayStartLine = (item.startLine ?? 0) + 1;
+        const displayEndLine = (item.endLine ?? 0) + 1;
+
         if (item.type === "file") {
             label = path.basename(item.path);
             description = "Full file";
             tooltip = `${item.path} - reviewed by ${item.author}\nContent has changed since review`;
         } else if (item.type === "finding") {
             label = item.entryLabel || "Untitled Finding";
-            description = `${path.basename(item.path)}:${item.startLine}-${item.endLine}`;
-            tooltip = `${item.entryLabel || "Finding"} - by ${item.author}\n${item.path}:${item.startLine}-${item.endLine}\nContent has changed since creation`;
+            description = `${path.basename(item.path)}:${displayStartLine}-${displayEndLine}`;
+            tooltip = `${item.entryLabel || "Finding"} - by ${item.author}\n${item.path}:${displayStartLine}-${displayEndLine}\nContent has changed since creation`;
         } else {
             // region
-            label = `${path.basename(item.path)}:${item.startLine}-${item.endLine}`;
-            description = `Lines ${item.startLine}-${item.endLine}`;
+            label = `${path.basename(item.path)}:${displayStartLine}-${displayEndLine}`;
+            description = `Lines ${displayStartLine}-${displayEndLine}`;
             tooltip = `${item.path} - reviewed by ${item.author}\nContent has changed since review`;
         }
 
