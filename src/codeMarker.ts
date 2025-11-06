@@ -2011,14 +2011,26 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
         });
 
         vscode.commands.registerCommand("weAudit.refreshStaleReviews", () => {
-            // Reload all configurations from disk (this loads data from .weaudit files)
+            // Clear all current data
+            this.treeEntries = [];
+            this.resolvedEntries = [];
+            this.pathToEntryMap.clear();
+
+            // Clear each workspace root's data
+            for (const wsRoot of this.workspaces.getRoots()) {
+                wsRoot["auditedFiles"] = [];
+                wsRoot["partiallyAuditedFiles"] = [];
+            }
+
+            // Reload all configurations from disk
             this.findAndLoadConfigurationUsernames();
             // Update stale reviews (which also performs auto-relocation)
             this.updateStaleReviews();
             // Refresh all editor decorations to show updated highlights
             this.decorate();
-            // Refresh the tree view
+            // Refresh the tree views
             this.refresh();
+            this.resolvedEntriesTree.refresh();
             vscode.window.showInformationMessage("Refresh complete.");
         });
 
