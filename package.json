@@ -47,6 +47,11 @@
                     "contextualTitle": "weAudit: "
                 },
                 {
+                    "id": "noteMarker",
+                    "name": "List of Notes",
+                    "contextualTitle": "weAudit: "
+                },
+                {
                     "type": "webview",
                     "id": "findingDetails",
                     "name": "Finding Details",
@@ -412,17 +417,17 @@
                 },
                 {
                     "command": "weAudit.showMarkedFilesDayLog",
-                    "when": "view == codeMarker",
+                    "when": "view == codeMarker || view == noteMarker",
                     "group": "navigation@0"
                 },
                 {
                     "command": "weAudit.exportFindingsInMarkdown",
-                    "when": "view == codeMarker",
+                    "when": "view == codeMarker || view == noteMarker",
                     "group": "navigation@1"
                 },
                 {
                     "command": "weAudit.toggleTreeViewMode",
-                    "when": "view == codeMarker",
+                    "when": "view == codeMarker || view == noteMarker",
                     "group": "navigation@2"
                 },
                 {
@@ -464,42 +469,42 @@
                 },
                 {
                     "command": "weAudit.editEntryTitle",
-                    "when": "view == codeMarker && viewItem != pathOrganizer && viewItem != additionalLocation",
+                    "when": "(view == codeMarker || view == noteMarker) && viewItem != pathOrganizer && viewItem != additionalLocation",
                     "group": "inline@1"
                 },
                 {
                     "command": "weAudit.copyEntryPermalink",
-                    "when": "view == codeMarker && viewItem == additionalLocation",
+                    "when": "(view == codeMarker || view == noteMarker) && viewItem == additionalLocation",
                     "group": "inline@2"
                 },
                 {
                     "command": "weAudit.copyEntryPermalinks",
-                    "when": "view == codeMarker && viewItem != pathOrganizer && viewItem != additionalLocation",
+                    "when": "(view == codeMarker || view == noteMarker) && viewItem != pathOrganizer && viewItem != additionalLocation",
                     "group": "inline@2"
                 },
                 {
                     "command": "weAudit.openGithubIssue",
-                    "when": "view == codeMarker && viewItem != pathOrganizer && viewItem != additionalLocation",
+                    "when": "(view == codeMarker || view == noteMarker) && viewItem != pathOrganizer && viewItem != additionalLocation",
                     "group": "inline@4"
                 },
                 {
                     "command": "weAudit.resolveFinding",
-                    "when": "view == codeMarker && viewItem != pathOrganizer && viewItem != additionalLocation",
+                    "when": "(view == codeMarker || view == noteMarker) && viewItem != pathOrganizer && viewItem != additionalLocation",
                     "group": "inline@5"
                 },
                 {
                     "command": "weAudit.deleteFinding",
-                    "when": "view == codeMarker && viewItem != pathOrganizer && viewItem != additionalLocation",
+                    "when": "(view == codeMarker || view == noteMarker) && viewItem != pathOrganizer && viewItem != additionalLocation",
                     "group": "inline@6"
                 },
                 {
                     "command": "weAudit.deleteLocation",
-                    "when": "view == codeMarker && viewItem == additionalLocation",
+                    "when": "(view == codeMarker || view == noteMarker) && viewItem == additionalLocation",
                     "group": "inline@6"
                 },
                 {
                     "command": "weAudit.editLocationEntry",
-                    "when": "view == codeMarker && viewItem == additionalLocation",
+                    "when": "(view == codeMarker || view == noteMarker) && viewItem == additionalLocation",
                     "group": "inline@1"
                 },
                 {

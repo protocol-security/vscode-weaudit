@@ -5221,6 +5221,62 @@ class DragAndDropController implements vscode.TreeDragAndDropController<TreeEntr
     }
 }
 
+/**
+ * Filtering wrapper for the tree data provider that only shows specific entry types
+ */
+class FilteredTreeDataProvider implements vscode.TreeDataProvider<TreeEntry> {
+    private provider: CodeMarker;
+    private filterType: EntryType;
+
+    constructor(provider: CodeMarker, filterType: EntryType) {
+        this.provider = provider;
+        this.filterType = filterType;
+    }
+
+    get onDidChangeTreeData(): vscode.Event<TreeEntry | undefined | void> {
+        return this.provider.onDidChangeTreeData;
+    }
+
+    getTreeItem(element: TreeEntry): vscode.TreeItem {
+        return this.provider.getTreeItem(element);
+    }
+
+    getChildren(element?: TreeEntry): TreeEntry[] {
+        const children = this.provider.getChildren(element);
+        // Filter entries at any level
+        return children.filter(child => {
+            if (isEntry(child)) {
+                // Filter entries based on entry type
+                return child.entryType === this.filterType;
+            }
+            if (isLocationEntry(child)) {
+                // Filter location entries based on their parent entry type
+                return child.parentEntry.entryType === this.filterType;
+            }
+            if (isPathOrganizerEntry(child)) {
+                // Only keep path organizers that have children matching the filter
+                const pathOrganizerChildren = this.provider.getChildren(child);
+                const hasMatchingChildren = pathOrganizerChildren.some(grandchild => {
+                    if (isEntry(grandchild)) {
+                        return grandchild.entryType === this.filterType;
+                    }
+                    if (isLocationEntry(grandchild)) {
+                        return grandchild.parentEntry.entryType === this.filterType;
+                    }
+                    return false;
+                });
+                return hasMatchingChildren;
+            }
+            // Keep other items
+            return true;
+        });
+    }
+
+    getParent(element: TreeEntry): vscode.ProviderResult<TreeEntry> {
+        return this.provider.getParent(element);
+    }
+}
+
 export class AuditMarker {
     private previousVisibleTextEditors: string[] = [];
     private decorationManager: DecorationManager;
@@ -5229,8 +5285,18 @@ export class AuditMarker {
         this.decorationManager = new DecorationManager(context);
 
         treeDataProvider = new CodeMarker(context, this.decorationManager);
-        treeView = vscode.window.createTreeView("codeMarker", { treeDataProvider, dragAndDropController: new DragAndDropController() });
+
+        // Create filtered providers for findings and notes
+        const findingsProvider = new FilteredTreeDataProvider(treeDataProvider, EntryType.Finding);
+        const notesProvider = new FilteredTreeDataProvider(treeDataProvider, EntryType.Note);
+
+        // Register findings view
+        treeView = vscode.window.createTreeView("codeMarker", { treeDataProvider: findingsProvider, dragAndDropController: new DragAndDropController() });
         context.subscriptions.push(treeView);
+
+        // Register notes view
+        const notesTreeView = vscode.window.createTreeView("noteMarker", { treeDataProvider: notesProvider, dragAndDropController: new DragAndDropController() });
+        context.subscriptions.push(notesTreeView);
 
         vscode.window.onDidChangeTextEditorSelection(this.checkSelectionEventAndRevealEntryUnderCursor, this);
 
