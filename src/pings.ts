@@ -8,7 +8,7 @@ export interface PingItem {
     rootPath: string;
     startLine: number;
     endLine: number;
-    author: string;
+    title: string;
 }
 
 export class PingsTree implements vscode.TreeDataProvider<PingItem> {
@@ -44,7 +44,7 @@ export class PingsTree implements vscode.TreeDataProvider<PingItem> {
 
     getTreeItem(item: PingItem): vscode.TreeItem {
         // Show author as the main label (like title/description in findings)
-        const treeItem = new vscode.TreeItem(item.author, vscode.TreeItemCollapsibleState.None);
+        const treeItem = new vscode.TreeItem(item.title, vscode.TreeItemCollapsibleState.None);
         treeItem.iconPath = new vscode.ThemeIcon("mention");
 
         // Show location as description (like in findings)
@@ -104,7 +104,7 @@ export class Pings {
                     item.rootPath === ping.rootPath &&
                     item.startLine === ping.startLine &&
                     item.endLine === ping.endLine &&
-                    item.author === ping.author
+                    item.title === ping.title
                 )
         );
         this.setPingItems(items);

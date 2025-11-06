@@ -4333,7 +4333,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                     rootPath: entry.locations[0].rootPath,
                     startLine: entry.locations[0].startLine,
                     endLine: entry.locations[0].endLine,
-                    author: entry.author,
+                    title: entry.label
                 });
             }
         }

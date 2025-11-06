@@ -1,0 +1,59 @@
+{
+  "clientRemote": "https://github.com/protocol-security/vscode-weaudit",
+  "gitRemote": "https://github.com/protocol-security/vscode-weaudit",
+  "gitSha": "d588e103161b608cc583866ec63cf638ae5ba1c4",
+  "treeEntries": [
+    {
+      "label": "askhjgdjasgd",
+      "entryType": 1,
+      "author": "nethoxaae",
+      "details": {
+        "severity": "",
+        "difficulty": "",
+        "type": "",
+        "description": "",
+        "exploit": "",
+        "recommendation": "",
+        "noteFor": "nethoxaae"
+      },
+      "locations": [
+        {
+          "path": "src/codeMarker.ts",
+          "startLine": 4323,
+          "endLine": 4323,
+          "label": "",
+          "description": "",
+          "contentHash": "6bedcd6a0dce51c1cc6a97fae8fdbb3c220eb747cbeb158ee2cdb7d9ccf71c27",
+          "timestamp": "2025-11-06T17:00:14.133Z"
+        }
+      ]
+    },
+    {
+      "label": "ad",
+      "entryType": 0,
+      "author": "nethoxaae",
+      "details": {
+        "severity": "",
+        "difficulty": "",
+        "type": "",
+        "description": "",
+        "exploit": "",
+        "recommendation": ""
+      },
+      "locations": [
+        {
+          "path": "src/codeMarker.ts",
+          "startLine": 4323,
+          "endLine": 4323,
+          "label": "",
+          "description": "",
+          "contentHash": "6bedcd6a0dce51c1cc6a97fae8fdbb3c220eb747cbeb158ee2cdb7d9ccf71c27",
+          "timestamp": "2025-11-06T17:00:18.735Z"
+        }
+      ]
+    }
+  ],
+  "auditedFiles": [],
+  "partiallyAuditedFiles": [],
+  "resolvedEntries": []
+}
