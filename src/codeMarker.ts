@@ -1227,7 +1227,14 @@ class WARoot {
 
         // filter local entries of the affected user
         let filteredAuditedFiles = this.auditedFiles.filter((file) => file.author === username);
-        let filteredPartiallyAuditedEntries = this.partiallyAuditedFiles.filter((entry) => entry.author === username);
+        // Convert line numbers to 1-indexed for partially audited files
+        let filteredPartiallyAuditedEntries = this.partiallyAuditedFiles
+            .filter((entry) => entry.author === username)
+            .map((entry) => ({
+                ...entry,
+                startLine: entry.startLine + 1,  // Convert to 1-indexed
+                endLine: entry.endLine + 1,      // Convert to 1-indexed
+            }));
 
         // get filtered entries from the CodeMarker
         const [filteredEntries, filteredResolvedEntries]: [FullEntry[], FullEntry[]] = await vscode.commands.executeCommand(
@@ -1237,6 +1244,7 @@ class WARoot {
         );
 
         // Remove the root path for backwards compatibility. It is implicit in the location of the saved file anyway.
+        // Convert line numbers to 1-indexed for human readability in the .weaudit files
         let reducedEntries = filteredEntries.map(
             (fullEntry) =>
                 ({
@@ -1248,8 +1256,8 @@ class WARoot {
                         (location) =>
                             ({
                                 path: location.path,
-                                startLine: location.startLine,
-                                endLine: location.endLine,
+                                startLine: location.startLine + 1,  // Convert to 1-indexed
+                                endLine: location.endLine + 1,      // Convert to 1-indexed
                                 label: location.label,
                                 description: location.description,
                                 contentHash: location.contentHash,
@@ -1269,8 +1277,8 @@ class WARoot {
                         (location) =>
                             ({
                                 path: location.path,
-                                startLine: location.startLine,
-                                endLine: location.endLine,
+                                startLine: location.startLine + 1,  // Convert to 1-indexed
+                                endLine: location.endLine + 1,      // Convert to 1-indexed
                                 label: location.label,
                                 description: location.description,
                                 contentHash: location.contentHash,
@@ -2873,10 +2881,10 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
         editor.revealRange(currentRange, vscode.TextEditorRevealType.InCenter);
         editor.selection = new vscode.Selection(currentRange.start, currentRange.end);
 
-        // Ask user for new line range
+        // Ask user for new line range (show 1-indexed numbers like the editor displays)
         const input = await vscode.window.showInputBox({
-            prompt: `Adjust line range for ${staleItem.entryLabel || "review"}`,
-            value: `${staleItem.startLine}-${staleItem.endLine}`,
+            prompt: `Adjust line range for ${staleItem.entryLabel || "review"} (editor line numbers)`,
+            value: `${staleItem.startLine + 1}-${staleItem.endLine + 1}`,  // Show 1-indexed
             placeHolder: "startLine-endLine (e.g., 100-150)",
             validateInput: (value) => {
                 const match = value.match(/^(\d+)-(\d+)$/);
@@ -2885,10 +2893,10 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                 }
                 const start = parseInt(match[1]);
                 const end = parseInt(match[2]);
-                if (start < 0 || end < start) {
-                    return "Invalid line range: end must be >= start";
+                if (start < 1 || end < start) {
+                    return "Invalid line range: end must be >= start and start must be >= 1";
                 }
-                if (end >= document.lineCount) {
+                if (end > document.lineCount) {
                     return `Line ${end} exceeds file length (${document.lineCount} lines)`;
                 }
                 return null;
@@ -2904,8 +2912,9 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             return;
         }
 
-        const newStartLine = parseInt(match[1]);
-        const newEndLine = parseInt(match[2]);
+        // User enters 1-indexed line numbers (what they see in editor), convert to 0-indexed
+        const newStartLine = parseInt(match[1]) - 1;
+        const newEndLine = parseInt(match[2]) - 1;
 
         // Update the lines based on type
         const [wsRoot, _relativePath] = this.workspaces.getCorrespondingRootAndPath(filePath);
@@ -2926,7 +2935,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             const uri = vscode.Uri.file(filePath);
             this._onDidChangeFileDecorationsEmitter.fire(uri);
             this.decorateWithUri(uri);
-            vscode.window.showInformationMessage(`Line numbers updated to ${newStartLine}-${newEndLine}`);
+            vscode.window.showInformationMessage(`Line numbers updated to ${newStartLine + 1}-${newEndLine + 1}`);
         } else {
             vscode.window.showErrorMessage(`Failed to update line numbers for ${staleItem.path}`);
         }
@@ -3846,6 +3855,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
         }
 
         // For backwards compatibility, we need to add the rootpath to the locations here
+        // Convert line numbers from 1-indexed (stored in file) to 0-indexed (VS Code API)
         const rootPath = wsRoot.rootPath;
         const fullParsedEntries = {
             clientRemote: parsedEntries.clientRemote,
@@ -3862,8 +3872,8 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                             (loc) =>
                                 ({
                                     path: loc.path,
-                                    startLine: loc.startLine,
-                                    endLine: loc.endLine,
+                                    startLine: loc.startLine - 1,  // Convert from 1-indexed to 0-indexed
+                                    endLine: loc.endLine - 1,      // Convert from 1-indexed to 0-indexed
                                     label: loc.label,
                                     description: loc.description,
                                     contentHash: loc.contentHash,
@@ -3875,7 +3885,12 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             ),
             auditedFiles: parsedEntries.auditedFiles,
             // older versions do not have partiallyAuditedFiles
-            partiallyAuditedFiles: parsedEntries.partiallyAuditedFiles,
+            // Convert line numbers from 1-indexed to 0-indexed
+            partiallyAuditedFiles: parsedEntries.partiallyAuditedFiles?.map((entry) => ({
+                ...entry,
+                startLine: entry.startLine - 1,  // Convert from 1-indexed to 0-indexed
+                endLine: entry.endLine - 1,      // Convert from 1-indexed to 0-indexed
+            })),
             resolvedEntries: parsedEntries.resolvedEntries.map(
                 (entry) =>
                     ({
@@ -3887,8 +3902,8 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                             (loc) =>
                                 ({
                                     path: loc.path,
-                                    startLine: loc.startLine,
-                                    endLine: loc.endLine,
+                                    startLine: loc.startLine - 1,  // Convert from 1-indexed to 0-indexed
+                                    endLine: loc.endLine - 1,      // Convert from 1-indexed to 0-indexed
                                     label: loc.label,
                                     description: loc.description,
                                     contentHash: loc.contentHash,
