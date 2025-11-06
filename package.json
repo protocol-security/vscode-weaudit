@@ -245,7 +245,7 @@
             },
             {
                 "command": "weAudit.refreshStaleReviews",
-                "title": "weAudit: Check for Stale Reviews/Findings",
+                "title": "weAudit: Refresh",
                 "icon": "$(refresh)"
             }
         ],
