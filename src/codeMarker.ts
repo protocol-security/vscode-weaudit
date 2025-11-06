@@ -2010,6 +2010,11 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             this.navigateToNextPartiallyAuditedRegion();
         });
 
+        vscode.commands.registerCommand("weAudit.refreshStaleReviews", () => {
+            this.updateStaleReviews();
+            vscode.window.showInformationMessage("Stale reviews/findings check complete.");
+        });
+
         vscode.commands.registerCommand("weAudit.resolveFinding", (node: FullEntry) => {
             this.resolveFinding(node);
         });

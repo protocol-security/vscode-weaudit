@@ -242,6 +242,11 @@
             {
                 "command": "weAudit.navigateToNextPartiallyAuditedRegion",
                 "title": "weAudit: Navigate to Next Partially Audited Region"
+            },
+            {
+                "command": "weAudit.refreshStaleReviews",
+                "title": "weAudit: Check for Stale Reviews/Findings",
+                "icon": "$(refresh)"
             }
         ],
         "keybindings": [
