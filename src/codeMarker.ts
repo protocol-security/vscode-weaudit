@@ -4382,12 +4382,13 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                 firstLoc.rootPath === ping.rootPath &&
                 firstLoc.startLine === ping.startLine &&
                 firstLoc.endLine === ping.endLine &&
-                entry.author === ping.author
+                entry.label === ping.title
             ) {
                 // Clear the noteFor field to remove the ping
                 entry.details.noteFor = undefined;
                 this.updateSavedData(entry.author);
                 this.updateSavedData(this.username);
+                this.deleteAndResolveFinding(entry, false);
                 this.updatePings();
                 vscode.window.showInformationMessage(`Ping deleted for ${path.basename(ping.path)}`);
                 return;
