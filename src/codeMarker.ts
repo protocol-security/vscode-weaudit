@@ -8,6 +8,7 @@ import { plot } from "asciichart";
 
 import { ResolvedEntries } from "./resolvedFindings";
 import { StaleReviews, StaleReviewItem } from "./staleReviews";
+import { Pings, PingItem } from "./pings";
 import { labelAfterFirstLineTextDecoration, hoverOnLabel, reviewerLabelDecoration, findingLabelDecoration, DecorationManager } from "./decorationManager";
 import {
     Entry,
@@ -1886,6 +1887,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
 
     private resolvedEntriesTree: ResolvedEntries;
     private staleReviewsTree: StaleReviews;
+    private pingsTree: Pings;
 
     private decorationManager: DecorationManager;
 
@@ -1909,6 +1911,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
         this.findAndLoadConfigurationUsernames();
         this.resolvedEntriesTree = new ResolvedEntries(context, this.resolvedEntries);
         this.staleReviewsTree = new StaleReviews(context, []);
+        this.pingsTree = new Pings(context, []);
 
         vscode.commands.executeCommand("weAudit.refreshSavedFindings", this.workspaces.getSelectedConfigurations());
 
@@ -2006,6 +2009,14 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             this.addNote();
         });
 
+        vscode.commands.registerCommand("weAudit.addNoteForNethoxa", () => {
+            this.addNoteFor("nethoxaae");
+        });
+
+        vscode.commands.registerCommand("weAudit.addNoteForJtraglia", () => {
+            this.addNoteFor("jtraglia");
+        });
+
         vscode.commands.registerCommand("weAudit.navigateToNextPartiallyAuditedRegion", () => {
             this.navigateToNextPartiallyAuditedRegion();
         });
@@ -2029,9 +2040,21 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             // Refresh all editor decorations to show updated highlights
             this.decorate();
             // Refresh the tree views
-            this.refresh();
+            this.refreshTree();
             this.resolvedEntriesTree.refresh();
             vscode.window.showInformationMessage("Refresh complete.");
+        });
+
+        vscode.commands.registerCommand("weAudit.refreshPings", () => {
+            this.updatePings();
+        });
+
+        vscode.commands.registerCommand("weAudit.copyPingPermalink", (ping: PingItem) => {
+            this.copyPingPermalink(ping);
+        });
+
+        vscode.commands.registerCommand("weAudit.deletePing", (ping: PingItem) => {
+            this.deletePing(ping);
         });
 
         vscode.commands.registerCommand("weAudit.resolveFinding", (node: FullEntry) => {
@@ -2542,6 +2565,9 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             case "type":
                 entry.details.type = value as FindingType;
                 break;
+            case "notefor":
+                entry.details.noteFor = value || undefined;
+                break;
             case "description":
                 entry.details.description = value;
                 break;
@@ -2561,6 +2587,10 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
         }
         if (isPersistent) {
             this.updateSavedData(entry.author);
+        }
+        // Update pings if noteFor field changed
+        if (field === "notefor") {
+            this.updatePings();
         }
     }
 
@@ -3352,6 +3382,14 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
     }
 
     /**
+     * Creates a new note entry tagged for a specific user
+     * @param noteFor the username to tag this note for
+     */
+    addNoteFor(noteFor: string): void {
+        this.createOrEditEntry(EntryType.Note, noteFor);
+    }
+
+    /**
      * Restores the entry to the tree entries list and removes it from the
      * resolved entries list.
      * @param entry the entry to restore
@@ -3444,7 +3482,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
      *
      * @param entryType the type of the entry to create
      */
-    async createOrEditEntry(entryType: EntryType): Promise<void> {
+    async createOrEditEntry(entryType: EntryType, noteFor?: string): Promise<void> {
         const editor = vscode.window.activeTextEditor;
         if (editor === undefined) {
             return;
@@ -3462,6 +3500,11 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
         // if we found an entry, edit the description
         if (intersectedIdx !== -1) {
             const entry = this.treeEntries[intersectedIdx];
+            // If noteFor is provided, update it
+            if (noteFor !== undefined) {
+                entry.details.noteFor = noteFor;
+                this.updateSavedData(this.username);
+            }
             // editEntryTitle calls updateSavedData so we don't need to call it here
             this.editEntryTitle(entry);
         } else {
@@ -3473,12 +3516,17 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                 return;
             }
 
+            const entryDetails = createDefaultEntryDetails();
+            if (noteFor !== undefined) {
+                entryDetails.noteFor = noteFor;
+            }
+
             const entry: FullEntry = {
                 label: title,
                 entryType: entryType,
                 author: this.username,
                 locations: [location],
-                details: createDefaultEntryDetails(),
+                details: entryDetails,
             };
             this.treeEntries.push(entry);
             this.updateSavedData(this.username);
@@ -3486,6 +3534,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
 
         this.decorateWithUri(uri);
         this.refresh(uri);
+        this.updatePings();
     }
 
     addNewEntryFromLocationEntry(locationEntry: FullLocationEntry): void {
@@ -4052,7 +4101,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                         startLine: location.startLine,
                         endLine: location.endLine,
                         entryLabel: entry.label,
-                        entryType: entry.entryType,
+                        entryType: entry.entryType === EntryType.Finding ? "Finding" : "Note",
                     });
                 }
             }
@@ -4080,6 +4129,88 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
     }
 
     /**
+     * Collects all findings and notes that are tagged for the current user.
+     * Excludes resolved entries.
+     * @returns An array of PingItem objects
+     */
+    private collectPings(): PingItem[] {
+        const pingItems: PingItem[] = [];
+        const username = this.username;
+
+        // Search through all active (non-resolved) entries
+        for (const entry of this.treeEntries) {
+            const details = entry.details;
+            
+            // Check if this entry is tagged for the current user
+            if (details.noteFor && details.noteFor === username) {
+                pingItems.push({
+                    path: entry.locations[0].path,
+                    rootPath: entry.locations[0].rootPath,
+                    startLine: entry.locations[0].startLine,
+                    endLine: entry.locations[0].endLine,
+                    author: entry.author,
+                });
+            }
+        }
+
+        return pingItems;
+    }
+
+    /**
+     * Updates the pings tree view with current ping items.
+     */
+    updatePings(): void {
+        const pingItems = this.collectPings();
+        this.pingsTree.setPingItems(pingItems);
+    }
+
+    /**
+     * Copy the permalink of the given ping to the clipboard
+     * @param ping The ping to copy the permalink of
+     */
+    async copyPingPermalink(ping: PingItem): Promise<void> {
+        const location: FullLocation = {
+            path: ping.path,
+            rootPath: ping.rootPath,
+            startLine: ping.startLine,
+            endLine: ping.endLine,
+            label: "",
+            description: "",
+        };
+        const remoteAndPermalink = await this.getEntryRemoteAndPermalink(location);
+        if (remoteAndPermalink === undefined) {
+            return;
+        }
+        this.copyToClipboard(remoteAndPermalink.permalink);
+    }
+
+    /**
+     * Delete a ping from the tree
+     * @param ping The ping to delete
+     */
+    async deletePing(ping: PingItem): Promise<void> {
+        // Find the corresponding entry and clear its noteFor field
+        for (const entry of this.treeEntries) {
+            const firstLoc = entry.locations[0];
+            if (
+                firstLoc.path === ping.path &&
+                firstLoc.rootPath === ping.rootPath &&
+                firstLoc.startLine === ping.startLine &&
+                firstLoc.endLine === ping.endLine &&
+                entry.author === ping.author
+            ) {
+                // Clear the noteFor field to remove the ping
+                entry.details.noteFor = undefined;
+                this.updateSavedData(entry.author);
+                this.updateSavedData(this.username);
+                this.updatePings();
+                vscode.window.showInformationMessage(`Ping deleted for ${path.basename(ping.path)}`);
+                return;
+            }
+        }
+    }
+
+    /**
      * Redecorates all currently visible editors based on the current treeEntries.
      */
     decorate(): void {
@@ -4087,6 +4218,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             this.decorateEditor(editor);
         });
         this.updateStaleReviews();
+        this.updatePings();
     }
 
     /**
@@ -4100,6 +4232,7 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             }
         });
         this.updateStaleReviews();
+        this.updatePings();
     }
 
     /**

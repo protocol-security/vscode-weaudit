@@ -199,6 +199,7 @@ export interface EntryDetails {
     description: string;
     exploit: string;
     recommendation: string;
+    noteFor?: string;  // Optional field to tag entries for specific users
 }
 
 /**
@@ -213,6 +214,7 @@ export function createDefaultEntryDetails(): EntryDetails {
         description: "",
         exploit: "",
         recommendation: "",
+        noteFor: undefined,
     };
 }
 

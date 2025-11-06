@@ -67,6 +67,7 @@ class FindingDetailsProvider implements vscode.WebviewViewProvider {
                 description: entry.description,
                 exploit: entry.exploit,
                 recommendation: entry.recommendation,
+                noteFor: entry.noteFor,
                 title: title,
             });
         }

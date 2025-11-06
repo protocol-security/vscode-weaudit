@@ -32,6 +32,9 @@ function main(): void {
     const typeDropdown = document.getElementById("type-dropdown") as Dropdown;
     typeDropdown?.addEventListener("change", handlePersistentFieldChange);
 
+    const noteForDropdown = document.getElementById("notefor-dropdown") as Dropdown;
+    noteForDropdown?.addEventListener("change", handlePersistentFieldChange);
+
     // for the text areas, we listen to to both the change and input events
     // on change events we persist the data into disk
     // on input events we just update the data in memory
@@ -66,6 +69,7 @@ function main(): void {
                 severityDropdown.value = message.severity;
                 difficultyDropdown.value = message.difficulty;
                 typeDropdown.value = message.type;
+                noteForDropdown.value = message.noteFor || "";
 
                 descriptionArea.value = message.description;
                 exploitArea.value = message.exploit;

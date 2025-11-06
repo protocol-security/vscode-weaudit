@@ -63,6 +63,11 @@
                     "contextualTitle": "weAudit"
                 },
                 {
+                    "id": "pings",
+                    "name": "Pings",
+                    "contextualTitle": "weAudit"
+                },
+                {
                     "type": "webview",
                     "id": "gitConfig",
                     "name": "Repository Configuration",
@@ -214,6 +219,14 @@
                 "title": "weAudit: New Note from Selection"
             },
             {
+                "command": "weAudit.addNoteForNethoxa",
+                "title": "weAudit: New Note for Nethoxa"
+            },
+            {
+                "command": "weAudit.addNoteForJtraglia",
+                "title": "weAudit: New Note for Jtraglia"
+            },
+            {
                 "command": "weAudit.editEntryUnderCursor",
                 "title": "weAudit: Edit Finding Under Cursor"
             },
@@ -247,6 +260,21 @@
                 "command": "weAudit.refreshStaleReviews",
                 "title": "weAudit: Refresh",
                 "icon": "$(refresh)"
+            },
+            {
+                "command": "weAudit.refreshPings",
+                "title": "Refresh Pings",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "weAudit.copyPingPermalink",
+                "title": "Copy Ping Permalink",
+                "icon": "$(link)"
+            },
+            {
+                "command": "weAudit.deletePing",
+                "title": "Delete Ping",
+                "icon": "$(trash)"
             }
         ],
         "keybindings": [
@@ -269,6 +297,16 @@
                 "command": "weAudit.addNote",
                 "key": "ctrl+alt+4",
                 "mac": "cmd+4"
+            },
+            {
+                "command": "weAudit.addNoteForNethoxa",
+                "key": "ctrl+alt+shift+n",
+                "mac": "cmd+shift+n"
+            },
+            {
+                "command": "weAudit.addNoteForJtraglia",
+                "key": "ctrl+alt+shift+j",
+                "mac": "cmd+shift+j"
             },
             {
                 "command": "weAudit.editEntryUnderCursor",
@@ -335,6 +373,14 @@
                     "when": "false"
                 },
                 {
+                    "command": "weAudit.copyPingPermalink",
+                    "when": "false"
+                },
+                {
+                    "command": "weAudit.deletePing",
+                    "when": "false"
+                },
+                {
                     "command": "weAudit.deleteResolvedFinding",
                     "when": "false"
                 },
@@ -393,9 +439,24 @@
                     "command": "weAudit.prevGitConfig",
                     "when": "view == gitConfig",
                     "group": "navigation@0"
+                },
+                {
+                    "command": "weAudit.refreshPings",
+                    "when": "view == pings",
+                    "group": "navigation"
                 }
             ],
             "view/item/context": [
+                {
+                    "command": "weAudit.copyPingPermalink",
+                    "when": "view == pings && viewItem == ping",
+                    "group": "inline@1"
+                },
+                {
+                    "command": "weAudit.deletePing",
+                    "when": "view == pings && viewItem == ping",
+                    "group": "inline@2"
+                },
                 {
                     "command": "weAudit.editEntryTitle",
                     "when": "view == codeMarker && viewItem != pathOrganizer && viewItem != additionalLocation",
