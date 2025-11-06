@@ -2056,14 +2056,6 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             this.addNote();
         });
 
-        vscode.commands.registerCommand("weAudit.addNoteForNethoxa", () => {
-            this.addNoteFor("nethoxaae");
-        });
-
-        vscode.commands.registerCommand("weAudit.addNoteForJtraglia", () => {
-            this.addNoteFor("jtraglia");
-        });
-
         vscode.commands.registerCommand("weAudit.navigateToNextPartiallyAuditedRegion", () => {
             this.navigateToNextPartiallyAuditedRegion();
         });
@@ -3561,14 +3553,6 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
     }
 
     /**
-     * Creates a new note entry tagged for a specific user
-     * @param noteFor the username to tag this note for
-     */
-    addNoteFor(noteFor: string): void {
-        this.createOrEditEntry(EntryType.Note, noteFor);
-    }
-
-    /**
      * Restores the entry to the tree entries list and removes it from the
      * resolved entries list.
      * @param entry the entry to restore
@@ -3679,11 +3663,55 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
         // if we found an entry, edit the description
         if (intersectedIdx !== -1) {
             const entry = this.treeEntries[intersectedIdx];
-            // If noteFor is provided, update it
+            
+            // Prompt for assignee update when editing
+            const currentAssignee = entry.details.noteFor || "";
+            const assigneePrompt = entryType === EntryType.Finding ? "Assign Finding To (optional)" : "Assign Note To (optional)";
+            
+            // Get unique authors from all entries
+            const allAuthors = new Set<string>();
+            allAuthors.add(this.username); // Add current user
+            
+            // Add predefined authors from findingDetails.html (already sorted alphabetically)
+            const predefinedAuthors = [
+                "andres", "antoine", "antonio", "bhargava", "fredrik", 
+                "johan", "justin", "marius", "nikos", "tyler", "yassine", "yoav"
+            ];
+            for (const author of predefinedAuthors) {
+                allAuthors.add(author);
+            }
+            
+            // Create dropdown items with sorted authors
+            const sortedAuthors = Array.from(allAuthors).sort();
+            const assigneeItems = [
+                ...sortedAuthors.map(author => ({ label: author, value: author }))
+            ];
+            
+            const selectedAssignee = await vscode.window.showQuickPick(assigneeItems, {
+                title: assigneePrompt,
+                placeHolder: "Select an assignee",
+                ignoreFocusOut: true,
+                matchOnDescription: true,
+                matchOnDetail: true
+            });
+            
+            // Update noteFor if user made a selection
+            if (selectedAssignee !== undefined) {
+                if (selectedAssignee.value === "") {
+                    // Clear the assignee if "(No assignee)" selected
+                    entry.details.noteFor = undefined;
+                } else {
+                    entry.details.noteFor = selectedAssignee.value;
+                }
+                this.updateSavedData(this.username);
+            }
+            
+            // If noteFor parameter was provided, it takes precedence
             if (noteFor !== undefined) {
                 entry.details.noteFor = noteFor;
                 this.updateSavedData(this.username);
             }
+            
             // editEntryTitle calls updateSavedData so we don't need to call it here
             this.editEntryTitle(entry);
         } else {
@@ -3695,9 +3723,43 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                 return;
             }
 
+            // Prompt for assignee (noteFor field) after title
+            const assigneePrompt = entryType === EntryType.Finding ? "Assign Finding To (optional)" : "Assign Note To (optional)";
+            
+            // Get unique authors from all entries
+            const allAuthors = new Set<string>();
+            allAuthors.add(this.username); // Add current user
+            
+            // Add predefined authors from findingDetails.html (already sorted alphabetically)
+            const predefinedAuthors = [
+                "(No assignee)", "andres", "antoine", "antonio", "bhargava", "fredrik", 
+                "johan", "justin", "marius", "nikos", "tyler", "yassine", "yoav"
+            ];
+            for (const author of predefinedAuthors) {
+                allAuthors.add(author);
+            }
+            
+            // Create dropdown items with sorted authors
+            const sortedAuthors = Array.from(allAuthors).sort();
+            const assigneeItems = [
+                ...sortedAuthors.map(author => ({ label: author, value: author }))
+            ];
+            
+            const selectedAssignee = await vscode.window.showQuickPick(assigneeItems, {
+                title: assigneePrompt,
+                placeHolder: "Select an assignee",
+                ignoreFocusOut: true,
+                matchOnDescription: true,
+                matchOnDetail: true
+            });
+            // Note: We don't return if selectedAssignee is undefined - it's optional
+
             const entryDetails = createDefaultEntryDetails();
             if (noteFor !== undefined) {
                 entryDetails.noteFor = noteFor;
+            } else if (selectedAssignee !== undefined && selectedAssignee.value !== "") {
+                // Only set noteFor if assignee was selected and is not empty
+                entryDetails.noteFor = selectedAssignee.value;
             }
 
             const entry: FullEntry = {

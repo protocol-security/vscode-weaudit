@@ -229,14 +229,6 @@
                 "title": "weAudit: New Note from Selection"
             },
             {
-                "command": "weAudit.addNoteForNethoxa",
-                "title": "weAudit: New Note for Nethoxa"
-            },
-            {
-                "command": "weAudit.addNoteForJtraglia",
-                "title": "weAudit: New Note for Jtraglia"
-            },
-            {
                 "command": "weAudit.editEntryUnderCursor",
                 "title": "weAudit: Edit Finding Under Cursor"
             },
@@ -307,16 +299,6 @@
                 "command": "weAudit.addNote",
                 "key": "ctrl+alt+4",
                 "mac": "cmd+4"
-            },
-            {
-                "command": "weAudit.addNoteForNethoxa",
-                "key": "ctrl+alt+shift+n",
-                "mac": "cmd+shift+n"
-            },
-            {
-                "command": "weAudit.addNoteForJtraglia",
-                "key": "ctrl+alt+shift+j",
-                "mac": "cmd+shift+j"
             },
             {
                 "command": "weAudit.editEntryUnderCursor",
