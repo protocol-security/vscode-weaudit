@@ -1046,6 +1046,41 @@ class WARoot {
     }
 
     /**
+     * Updates the line numbers for a partially audited region and recalculates the content hash.
+     * @param filePath The relative path of the file
+     * @param oldStartLine The old start line
+     * @param oldEndLine The old end line
+     * @param newStartLine The new start line
+     * @param newEndLine The new end line
+     * @returns true if successful, false otherwise
+     */
+    updatePartiallyAuditedFileLines(filePath: string, oldStartLine: number, oldEndLine: number, newStartLine: number, newEndLine: number): boolean {
+        try {
+            const index = this.partiallyAuditedFiles.findIndex(
+                (f) => f.path === filePath && f.startLine === oldStartLine && f.endLine === oldEndLine
+            );
+            if (index === -1) {
+                return false;
+            }
+
+            const fullPath = path.join(this.rootPath, filePath);
+            const fileContent = fs.readFileSync(fullPath, "utf8");
+            const lines = fileContent.split("\n");
+            const regionContent = lines.slice(newStartLine, newEndLine + 1).join("\n");
+            const newHash = computeContentHash(regionContent);
+
+            this.partiallyAuditedFiles[index].startLine = newStartLine;
+            this.partiallyAuditedFiles[index].endLine = newEndLine;
+            this.partiallyAuditedFiles[index].contentHash = newHash;
+            this.partiallyAuditedFiles[index].timestamp = new Date().toISOString();
+            return true;
+        } catch (error) {
+            console.error(`[weAudit] Failed to update lines for partially audited region in ${filePath}:`, error);
+            return false;
+        }
+    }
+
+    /**
      * Removes an audited file from the list.
      * @param filePath The relative path of the file to remove
      * @returns true if successful, false otherwise
@@ -1994,6 +2029,10 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             this.deleteStaleReview(node);
         });
 
+        vscode.commands.registerCommand("weAudit.adjustStaleLines", (node: StaleReviewItem) => {
+            this.adjustStaleLines(node);
+        });
+
         vscode.commands.registerCommand("weAudit.toggleTreeViewMode", () => {
             this.toggleTreeViewMode();
         });
@@ -2687,6 +2726,52 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
     }
 
     /**
+     * Updates the line numbers for a finding location and recalculates the content hash.
+     * @param rootPath The root path of the workspace
+     * @param filePath The relative path of the file
+     * @param oldStartLine The old start line
+     * @param oldEndLine The old end line
+     * @param newStartLine The new start line
+     * @param newEndLine The new end line
+     * @param author The author of the finding
+     * @returns true if successful, false otherwise
+     */
+    private updateFindingLocationLines(rootPath: string, filePath: string, oldStartLine: number, oldEndLine: number, newStartLine: number, newEndLine: number, author: string): boolean {
+        try {
+            // Find the entry with this location
+            for (const entry of this.treeEntries) {
+                if (entry.author !== author) {
+                    continue;
+                }
+                for (const location of entry.locations) {
+                    if (
+                        location.rootPath === rootPath &&
+                        location.path === filePath &&
+                        location.startLine === oldStartLine &&
+                        location.endLine === oldEndLine
+                    ) {
+                        // Recompute the hash for the new line range
+                        const fullPath = path.join(rootPath, filePath);
+                        const fileContent = fs.readFileSync(fullPath, "utf8");
+                        const lines = fileContent.split("\n");
+                        const regionContent = lines.slice(newStartLine, newEndLine + 1).join("\n");
+
+                        location.startLine = newStartLine;
+                        location.endLine = newEndLine;
+                        location.contentHash = computeContentHash(regionContent);
+                        location.timestamp = new Date().toISOString();
+                        return true;
+                    }
+                }
+            }
+            return false;
+        } catch (error) {
+            console.error(`[weAudit] Failed to update lines for finding location in ${filePath}:`, error);
+            return false;
+        }
+    }
+
+    /**
      * Deletes a finding location. If it's the only location in the finding, deletes the entire finding.
      * @param rootPath The root path of the workspace
      * @param filePath The relative path of the file
@@ -2759,6 +2844,91 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             vscode.window.showInformationMessage(`${itemType.charAt(0).toUpperCase() + itemType.slice(1)} updated for ${path.basename(staleItem.path)}`);
         } else {
             vscode.window.showErrorMessage(`Failed to update ${staleItem.type} for ${staleItem.path}`);
+        }
+    }
+
+    /**
+     * Manually adjusts the line numbers for a stale finding or region.
+     * @param staleItem The stale item to adjust
+     */
+    async adjustStaleLines(staleItem: StaleReviewItem): Promise<void> {
+        // Only applicable to regions and findings
+        if (staleItem.type === "file") {
+            vscode.window.showWarningMessage("Cannot adjust lines for full file reviews.");
+            return;
+        }
+
+        if (staleItem.startLine === undefined || staleItem.endLine === undefined) {
+            vscode.window.showErrorMessage("Invalid stale item: missing line numbers.");
+            return;
+        }
+
+        // Open the file to help the user see where the lines should go
+        const filePath = path.join(staleItem.rootPath, staleItem.path);
+        const document = await vscode.workspace.openTextDocument(filePath);
+        const editor = await vscode.window.showTextDocument(document);
+
+        // Highlight the current (incorrect) lines
+        const currentRange = new vscode.Range(staleItem.startLine, 0, staleItem.endLine, 0);
+        editor.revealRange(currentRange, vscode.TextEditorRevealType.InCenter);
+        editor.selection = new vscode.Selection(currentRange.start, currentRange.end);
+
+        // Ask user for new line range
+        const input = await vscode.window.showInputBox({
+            prompt: `Adjust line range for ${staleItem.entryLabel || "review"}`,
+            value: `${staleItem.startLine}-${staleItem.endLine}`,
+            placeHolder: "startLine-endLine (e.g., 100-150)",
+            validateInput: (value) => {
+                const match = value.match(/^(\d+)-(\d+)$/);
+                if (!match) {
+                    return "Please enter a valid line range (e.g., 100-150)";
+                }
+                const start = parseInt(match[1]);
+                const end = parseInt(match[2]);
+                if (start < 0 || end < start) {
+                    return "Invalid line range: end must be >= start";
+                }
+                if (end >= document.lineCount) {
+                    return `Line ${end} exceeds file length (${document.lineCount} lines)`;
+                }
+                return null;
+            }
+        });
+
+        if (!input) {
+            return; // User cancelled
+        }
+
+        const match = input.match(/^(\d+)-(\d+)$/);
+        if (!match) {
+            return;
+        }
+
+        const newStartLine = parseInt(match[1]);
+        const newEndLine = parseInt(match[2]);
+
+        // Update the lines based on type
+        const [wsRoot, _relativePath] = this.workspaces.getCorrespondingRootAndPath(filePath);
+        if (wsRoot === undefined) {
+            vscode.window.showErrorMessage(`weAudit: Could not find workspace root for ${staleItem.path}`);
+            return;
+        }
+
+        let success = false;
+        if (staleItem.type === "region") {
+            success = wsRoot.updatePartiallyAuditedFileLines(staleItem.path, staleItem.startLine, staleItem.endLine, newStartLine, newEndLine);
+        } else if (staleItem.type === "finding") {
+            success = this.updateFindingLocationLines(staleItem.rootPath, staleItem.path, staleItem.startLine, staleItem.endLine, newStartLine, newEndLine, staleItem.author);
+        }
+
+        if (success) {
+            this.updateSavedData(staleItem.author);
+            const uri = vscode.Uri.file(filePath);
+            this._onDidChangeFileDecorationsEmitter.fire(uri);
+            this.decorateWithUri(uri);
+            vscode.window.showInformationMessage(`Line numbers updated to ${newStartLine}-${newEndLine}`);
+        } else {
+            vscode.window.showErrorMessage(`Failed to update line numbers for ${staleItem.path}`);
         }
     }
 
