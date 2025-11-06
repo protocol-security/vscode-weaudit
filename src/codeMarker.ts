@@ -4398,6 +4398,8 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                     fullFileReviewerLabels.push(reviewerLabelDecoration(0, auditedFile.author, auditedFile.timestamp));
                 } else {
                     staleRange = [new vscode.Range(0, 0, editor.document.lineCount, 0)];
+                    // Add reviewer label at the top of the file even for stale full file reviews
+                    fullFileReviewerLabels.push(reviewerLabelDecoration(0, auditedFile.author, auditedFile.timestamp));
                 }
             }
             partiallyAuditedFiles.push(...wsRoot.getPartiallyAudited().filter((entry) => entry.path === fname));
@@ -4421,6 +4423,8 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
                     reviewerLabels.push(reviewerLabelDecoration(paf.startLine, paf.author, paf.timestamp));
                 } else {
                     stalePartiallyAuditedDecorations.push(decoration);
+                    // Add reviewer label at the start of the region even for stale reviews
+                    reviewerLabels.push(reviewerLabelDecoration(paf.startLine, paf.author, paf.timestamp));
                     // Track that this line has a stale label
                     staleLabelLines.add(paf.startLine);
                 }
