@@ -55,6 +55,12 @@ import {
 export const SERIALIZED_FILE_EXTENSION = ".weaudit";
 const DAY_LOG_FILENAME = ".weauditdaylog";
 
+// Predefined list of valid usernames for this weAudit workspace
+const VALID_USERNAMES = [
+    "andres", "antoine", "antonio", "bhargava", "fredrik",
+    "johan", "justin", "marius", "nikos", "tyler", "yassine", "yoav"
+];
+
 /**
  * Class representing a WeAudit workspace root. Each root maintains its own set of
  * configuration files (configs) with clientRemote, gitRemote, gitSha, treeEntries, auditedFiles,
@@ -167,6 +173,31 @@ class WARoot {
                 this.currentlySelectedConfigs.push(configEntry);
             }
         });
+    }
+
+    /**
+     * Validates that the current username exists in the predefined list of valid usernames.
+     * If not, prompts the user to select a username from the list.
+     */
+    async validateUsername(): Promise<void> {
+        // Check if current username is in the predefined list
+        if (VALID_USERNAMES.includes(this.username)) {
+            return; // Username is valid
+        }
+
+        // Username not found, prompt user to select
+        const selected = await vscode.window.showQuickPick(VALID_USERNAMES, {
+            placeHolder: "Your username doesn't match the predefined list. Please select your username:",
+            canPickMany: false,
+            ignoreFocusOut: true,
+        });
+
+        if (selected) {
+            // Update the configuration with the selected username
+            await vscode.workspace.getConfiguration("weAudit").update("general.username", selected, true);
+            this.username = selected;
+            vscode.window.showInformationMessage(`weAudit: Username set to ${selected}`);
+        }
     }
 
     /**
@@ -1385,15 +1416,20 @@ class MultiRootManager {
     constructor(context: vscode.ExtensionContext) {
         this.pathToRootMap = new Map<string, [WARoot, string, boolean]>();
         this.pathToMultipleRootMap = new Map<string, [WARoot, string][]>();
-        this.roots = this.setupRoots();
+        this.roots = [];
 
-        // We tell the Git Config Webview about the roots
-        // MultiConfig will request the roots by itself when
-        // weAudit.findAndLoadConfigurationFiles is executed by the CodeMarker
-        vscode.commands.executeCommand(
-            "weAudit.setGitConfigRoots",
-            this.roots.map((root) => ({ rootPath: root.rootPath, rootLabel: root.getRootLabel() }) as RootPathAndLabel),
-        );
+        // Setup roots asynchronously with username validation
+        this.setupRoots().then(roots => {
+            this.roots = roots;
+
+            // We tell the Git Config Webview about the roots
+            // MultiConfig will request the roots by itself when
+            // weAudit.findAndLoadConfigurationFiles is executed by the CodeMarker
+            vscode.commands.executeCommand(
+                "weAudit.setGitConfigRoots",
+                this.roots.map((root) => ({ rootPath: root.rootPath, rootLabel: root.getRootLabel() }) as RootPathAndLabel),
+            );
+        });
         // Add a listener for changes to the roots
         const listener = async (event: vscode.WorkspaceFoldersChangeEvent): Promise<void> => {
             // Any removed or added roots will execute weAudit.toggleSavedFindings, which will cause a refresh
@@ -1416,6 +1452,7 @@ class MultiRootManager {
             }
             for (; i < newRootPathsAndLabels.length; i++) {
                 const root = new WARoot(newRootPathsAndLabels[i].rootPath, newRootPathsAndLabels[i].rootLabel);
+                await root.validateUsername();
                 this.roots.push(root);
                 for (const config of root.getConfigs()) {
                     // This is a quirk, because the WARoot constructor sets the configurations as active,
@@ -1542,7 +1579,7 @@ class MultiRootManager {
      * Sets up the workspace root folders, which are each instances of the WARoot class.
      * @returns An array of current the current WARoot instances.
      */
-    private setupRoots(): WARoot[] {
+    private async setupRoots(): Promise<WARoot[]> {
         this.pathToRootMap.clear();
         this.pathToMultipleRootMap.clear();
         const roots: WARoot[] = [];
@@ -1553,6 +1590,7 @@ class MultiRootManager {
         const rootPathsAndLabels = this.createUniqueLabels(vscode.workspace.workspaceFolders.map((folder) => folder.uri.fsPath));
         for (const rootPathAndLabel of rootPathsAndLabels) {
             const root = new WARoot(rootPathAndLabel.rootPath, rootPathAndLabel.rootLabel);
+            await root.validateUsername();
             roots.push(root);
         }
 
@@ -3671,13 +3709,9 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             // Get unique authors from all entries
             const allAuthors = new Set<string>();
             allAuthors.add(this.username); // Add current user
-            
-            // Add predefined authors from findingDetails.html (already sorted alphabetically)
-            const predefinedAuthors = [
-                "andres", "antoine", "antonio", "bhargava", "fredrik", 
-                "johan", "justin", "marius", "nikos", "tyler", "yassine", "yoav"
-            ];
-            for (const author of predefinedAuthors) {
+
+            // Add predefined valid usernames (already sorted alphabetically)
+            for (const author of VALID_USERNAMES) {
                 allAuthors.add(author);
             }
             
@@ -3729,13 +3763,12 @@ export class CodeMarker implements vscode.TreeDataProvider<TreeEntry> {
             // Get unique authors from all entries
             const allAuthors = new Set<string>();
             allAuthors.add(this.username); // Add current user
-            
-            // Add predefined authors from findingDetails.html (already sorted alphabetically)
-            const predefinedAuthors = [
-                "(No assignee)", "andres", "antoine", "antonio", "bhargava", "fredrik", 
-                "johan", "justin", "marius", "nikos", "tyler", "yassine", "yoav"
-            ];
-            for (const author of predefinedAuthors) {
+
+            // Add "(No assignee)" option
+            allAuthors.add("(No assignee)");
+
+            // Add predefined valid usernames (already sorted alphabetically)
+            for (const author of VALID_USERNAMES) {
                 allAuthors.add(author);
             }
             
